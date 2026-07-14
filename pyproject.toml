@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "forge-devices-realsense-camera"
+version = "0.1.0"
+description = "Intel RealSense depth camera dora node"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "dora-rs==0.4.1",
+    "forge-common",
+    "forge-msgs",
+    "pyrealsense2",
+    "numpy",
+    "opencv-python",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+realsense-camera = "forge_devices_realsense_camera.main:main"
+realsense_camera = "forge_devices_realsense_camera.main:main"
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+build = [
+    "pyinstaller",
+]
+
+[tool.uv.sources]
+forge-common = { git = "https://gitlab.ex-ai.cn/meta-emt/framework/forge.git", rev = "dev", subdirectory = "packages/common" }
+forge-msgs = { git = "https://gitlab.ex-ai.cn/meta-emt/framework/forge.git", rev = "dev", subdirectory = "packages/msgs" }
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,47 @@
+device_serial: null
+device_index: 0
+connect_delay_ms: 0
+init_timeout_sec: 20.0
+prewarm_frames: 15
+align_to: color
+
+output_color: image/color
+output_depth: image/depth
+output_ir_left: image/ir_left
+output_ir_right: image/ir_right
+
+color:
+  data_flow:
+    enabled: true
+    width: 640
+    height: 480
+    fps: 30
+    format: rgb8
+    jpeg_quality: 85
+
+depth:
+  data_flow:
+    enabled: true
+    width: 640
+    height: 480
+    fps: 30
+    format: z16
+  controls:
+    min_mm: 100
+    max_mm: 10000
+
+infrared:
+  left:
+    enabled: true
+    stream_index: 1
+    width: 640
+    height: 480
+    fps: 30
+    format: y8
+  right:
+    enabled: false
+    stream_index: 2
+    width: 640
+    height: 480
+    fps: 30
+    format: y8

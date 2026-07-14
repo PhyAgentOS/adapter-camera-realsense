@@ -1,0 +1,27 @@
+# RealSense D435 + 通用 Rust image_viewer（PyInstaller，四路 color/depth/ir_left/ir_right）
+# 若聚焦窗口后画面停住但 Alt+Tab 预览仍在动，是 image_viewer 多窗口重绘问题。
+# 运行前先构建二进制：
+#   bash scripts/build_pyinstaller.sh
+# 并确保 image_viewer 已加入 PATH
+# 再在 examples/realsense_camera_viewer 目录下：
+#   dora build dataflow_binary.yaml --uv && dora run dataflow_binary.yaml --uv
+
+nodes:
+  - id: realsense_camera
+    path: ../../dist/realsense_camera
+    inputs:
+      tick: dora/timer/millis/33
+    outputs:
+      - image/color
+      - image/depth
+      - image/ir_left
+      - image/ir_right
+    args: --config realsense_camera.yaml
+
+  - id: image_viewer
+    path: image_viewer
+    inputs:
+      image/color: realsense_camera/image/color
+      image/depth: realsense_camera/image/depth
+      image/ir_left: realsense_camera/image/ir_left
+      image/ir_right: realsense_camera/image/ir_right

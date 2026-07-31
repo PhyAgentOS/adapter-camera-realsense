@@ -24,6 +24,7 @@ class RealSenseFrame:
     ir_left: np.ndarray | None
     ir_right: np.ndarray | None
     timestamp_ms: int = 0
+    capture_timestamp_ns: int | None = None
 
 
 @dataclass

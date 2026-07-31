@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import cv2
 import numpy as np
 from forge_msgs import CompressedImage, Image
 
+from forge_devices_realsense_camera import backend_realsense
 from forge_devices_realsense_camera import main as realsense_main
 from forge_devices_realsense_camera import snapshot as realsense_snapshot
 from forge_devices_realsense_camera.backend import RealSenseFrame, depth_units_to_metres
@@ -94,6 +97,59 @@ class MessageBuilderTests(unittest.TestCase):
         self.assertEqual(decoded.encoding, "32FC1")
         self.assertEqual(decoded.to_numpy().dtype, np.float32)
         np.testing.assert_array_equal(decoded.to_numpy(), depth)
+
+    def test_send_output_uses_same_optional_capture_metadata(self) -> None:
+        node = mock.Mock()
+        frame = RealSenseFrame(
+            color=None,
+            depth=None,
+            ir_left=None,
+            ir_right=None,
+            capture_timestamp_ns=1_234_567_890,
+        )
+
+        for output_id in ("color", "depth", "ir_left", "ir_right"):
+            realsense_main._send_output(
+                node,
+                output_id,
+                mock.sentinel.payload,
+                frame.capture_timestamp_ns,
+            )
+
+        self.assertEqual(node.send_output.call_count, 4)
+        for call in node.send_output.call_args_list:
+            self.assertEqual(call.kwargs["metadata"], {"capture_timestamp_ns": 1_234_567_890})
+
+    def test_cached_backend_frame_keeps_capture_timestamp(self) -> None:
+        backend = backend_realsense.RealSenseBackend.__new__(
+            backend_realsense.RealSenseBackend
+        )
+        backend._first_frame_event = threading.Event()
+        backend._first_frame_event.set()
+        backend._lock = threading.Lock()
+        expected = RealSenseFrame(
+            color=None,
+            depth=None,
+            ir_left=None,
+            ir_right=None,
+            capture_timestamp_ns=1_234_567_890,
+        )
+        backend._latest_frame = expected
+
+        first = backend.capture_frame()
+        second = backend.capture_frame()
+
+        self.assertIs(first, expected)
+        self.assertIs(second, expected)
+        self.assertEqual(first.capture_timestamp_ns, 1_234_567_890)
+        self.assertEqual(second.capture_timestamp_ns, 1_234_567_890)
+
+    def test_send_output_omits_missing_capture_timestamp(self) -> None:
+        node = mock.Mock()
+
+        realsense_main._send_output(node, "color", mock.sentinel.payload, None)
+
+        self.assertEqual(node.send_output.call_args.kwargs["metadata"], {})
 
     def test_uint8_ir_uses_mono8_image(self) -> None:
         ir = np.arange(6, dtype=np.uint8).reshape(2, 3)

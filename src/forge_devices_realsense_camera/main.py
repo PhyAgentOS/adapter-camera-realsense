@@ -227,6 +227,26 @@ def _frame_to_ir_image(arr) -> Image | None:
     return Image.from_numpy(arr, encoding="16UC1")
 
 
+def _capture_metadata(capture_timestamp_ns: int | None) -> dict[str, int]:
+    """Build optional user metadata without touching Dora-managed metadata."""
+    if capture_timestamp_ns is None:
+        return {}
+    return {"capture_timestamp_ns": capture_timestamp_ns}
+
+
+def _send_output(
+    node: object,
+    output_id: str,
+    payload: object,
+    capture_timestamp_ns: int | None,
+) -> None:
+    node.send_output(  # type: ignore[attr-defined]
+        output_id,
+        payload,
+        metadata=_capture_metadata(capture_timestamp_ns),
+    )
+
+
 def run_node(config: RealSenseConfig) -> int:
     logger.info(
         "[realsense] init device serial=%s index=%d align_to=%s",
@@ -258,28 +278,48 @@ def run_node(config: RealSenseConfig) -> int:
 
                     color_img = _frame_to_color_image(frame, config)
                     if color_img is not None:
-                        node.send_output(config.output_color, color_img.to_arrow())
+                        _send_output(
+                            node,
+                            config.output_color,
+                            color_img.to_arrow(),
+                            frame.capture_timestamp_ns,
+                        )
                     else:
                         logger.warning("[realsense] tick %d: empty color frame", frame.timestamp_ms)
 
                     if config.depth.data_flow.enabled:
                         depth_img = _frame_to_depth_image(frame)
                         if depth_img is not None:
-                            node.send_output(config.output_depth, depth_img.to_arrow())
+                            _send_output(
+                                node,
+                                config.output_depth,
+                                depth_img.to_arrow(),
+                                frame.capture_timestamp_ns,
+                            )
                         else:
                             logger.warning("[realsense] tick %d: empty depth frame", frame.timestamp_ms)
 
                     if config.infrared.left.enabled:
                         ir_left_img = _frame_to_ir_image(frame.ir_left)
                         if ir_left_img is not None:
-                            node.send_output(config.output_ir_left, ir_left_img.to_arrow())
+                            _send_output(
+                                node,
+                                config.output_ir_left,
+                                ir_left_img.to_arrow(),
+                                frame.capture_timestamp_ns,
+                            )
                         else:
                             logger.warning("[realsense] tick %d: empty ir_left frame", frame.timestamp_ms)
 
                     if config.infrared.right.enabled:
                         ir_right_img = _frame_to_ir_image(frame.ir_right)
                         if ir_right_img is not None:
-                            node.send_output(config.output_ir_right, ir_right_img.to_arrow())
+                            _send_output(
+                                node,
+                                config.output_ir_right,
+                                ir_right_img.to_arrow(),
+                                frame.capture_timestamp_ns,
+                            )
                         else:
                             logger.warning("[realsense] tick %d: empty ir_right frame", frame.timestamp_ms)
 

@@ -75,7 +75,10 @@ dora run dataflow.yaml --uv
 - `image/depth`：`forge_msgs.Image` `32FC1`，float32，单位米，0 表示无效值
 - `image/ir_left`、`image/ir_right`：`Image` `mono8` 或 `16UC1`
 - 图像尺寸来自实际采集/对齐结果
-- Dora 消息接收时间由下游本机记录；相机帧时间戳目前只用于节点日志，未写入消息头
+- Dora 图像输出会尽力附加用户 metadata `capture_timestamp_ns`。它是采集后端取得该
+  FrameSet 时记录的 Unix epoch 纳秒时间；同一 FrameSet 的各路输出共享该值，缓存帧
+  重复返回时不会重新生成。该字段是可选的最佳估计，不替代 Dora 管理的消息时间戳
+- SDK 帧时间戳仍只用于节点日志，不直接作为公共时间
 - depth 对齐 color 时使用 color 坐标系；IR 保持各自原生坐标系
 
 ## 配置

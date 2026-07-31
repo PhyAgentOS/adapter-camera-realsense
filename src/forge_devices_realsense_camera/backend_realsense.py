@@ -312,9 +312,11 @@ class RealSenseBackend:
                     continue
                 if not frames:
                     continue
+                capture_timestamp_ns = time.time_ns()
                 if self._align is not None:
                     frames = self._align.process(frames)
                 frame = self._convert_frameset(frames)
+                frame.capture_timestamp_ns = capture_timestamp_ns
                 with self._lock:
                     self._latest_frame = frame
                 self._first_frame_event.set()

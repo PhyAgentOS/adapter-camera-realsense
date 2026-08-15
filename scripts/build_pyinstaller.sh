@@ -7,6 +7,9 @@ DIST_DIR="${PACKAGE_DIR}/dist"
 WORK_DIR="${PACKAGE_DIR}/build/pyinstaller"
 VENV_DIR="${PACKAGE_DIR}/.venv_build"
 
+# Keep host Python and loader paths from contaminating the frozen payload.
+unset PYTHONHOME PYTHONPATH LD_LIBRARY_PATH LD_LIBRARY_PATH_ORIG
+
 cd "${PACKAGE_DIR}"
 mkdir -p "${DIST_DIR}" "${WORK_DIR}"
 rm -f "${DIST_DIR}/realsense_camera" "${DIST_DIR}/realsense_camera.exe"
@@ -20,6 +23,7 @@ UV_PROJECT_ENVIRONMENT="${VENV_DIR}" uv sync \
   --no-default-groups \
   --group build \
   --no-install-project \
+  --managed-python \
   --python 3.12
 
 LICENSE_BUNDLE="${WORK_DIR}/THIRD_PARTY_LICENSES.txt"

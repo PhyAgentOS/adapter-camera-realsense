@@ -303,6 +303,17 @@ def main() -> int:
     for failed, message in failures:
         if failed:
             print(f"audit failed: {message}", file=sys.stderr)
+            details_key = {
+                "unresolved ELF dependencies": "missing_dependencies",
+                "unsafe RPATH/RUNPATH entries": "unsafe_search_paths",
+                "non-x86_64 or incompatible ELF objects": "incompatible_elf",
+                "expected exactly one bundled pyrealsense2 extension": "pyrealsense2_extensions",
+            }.get(message)
+            if details_key is not None:
+                print(
+                    json.dumps(report[details_key], indent=2, sort_keys=True),
+                    file=sys.stderr,
+                )
             return 1
     return 0
 

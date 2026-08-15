@@ -1,22 +1,41 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "forge-devices-realsense-camera"
-version = "0.1.0"
-description = "Intel RealSense depth camera dora node"
+version = "1.0.0"
+description = "Linux Intel RealSense depth camera capture and Dora streaming node."
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [
+    { name = "X-ERA" },
+]
+keywords = ["camera", "depth-camera", "realsense", "dora", "robotics"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Multimedia :: Video :: Capture",
+]
 dependencies = [
     "dora-rs==0.4.1",
-    "forge-common",
-    "forge-msgs",
-    "pyrealsense2",
-    "numpy",
-    "opencv-python",
-    "pyyaml>=6.0",
+    "forge-common==1.0.1",
+    "forge-msgs==1.0.1",
+    "pyrealsense2>=2.58.2,<3",
+    "numpy>=1.26,<3",
+    "opencv-python>=4.8,<6",
+    "pyyaml>=6.0,<7",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Forgelab-Robotics/adapter-camera-realsense"
+Repository = "https://github.com/Forgelab-Robotics/adapter-camera-realsense"
+Documentation = "https://github.com/Forgelab-Robotics/adapter-camera-realsense#readme"
+Issues = "https://github.com/Forgelab-Robotics/adapter-camera-realsense/issues"
 
 [project.scripts]
 realsense-camera = "forge_devices_realsense_camera.main:main"
@@ -27,15 +46,15 @@ dev = [
     "pytest",
 ]
 build = [
+    "pip-licenses>=5,<6",
     "pyinstaller",
 ]
 
-[tool.uv.sources]
-forge-common = { git = "https://gitlab.ex-ai.cn/meta-emt/framework/forge.git", rev = "dev", subdirectory = "packages/common" }
-forge-msgs = { git = "https://gitlab.ex-ai.cn/meta-emt/framework/forge.git", rev = "dev", subdirectory = "packages/msgs" }
-
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+forge_devices_realsense_camera = ["resources/*.rules", "resources/*.yaml"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

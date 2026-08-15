@@ -16,15 +16,18 @@ from __future__ import annotations
 
 import argparse
 import sys
+from importlib.metadata import PackageNotFoundError, distribution
 
 from dora import Node
 from forge_common import get_logger
 from forge_msgs import CompressedImage, Image
 
+from . import __version__
 from .backend import RealSenseFrame, create_backend
 from .config import RealSenseConfig
 from .list_devices import run_list_devices
 from .snapshot import resolve_snapshot_config, run_snapshot
+from .system_setup import run_init_device, runtime_preflight
 
 logger = get_logger(__name__)
 
@@ -40,7 +43,8 @@ _ROOT_DESCRIPTION = """\
 Intel RealSense 深度相机 dora 节点：在 tick 驱动下输出 Color / Depth / 双 IR（forge_msgs.Image / CompressedImage）。
 
 【节点模式】不提供子命令时启动 dora，需配置文件。
-【工具子命令】list-devices / snapshot 仅操作本机相机并退出，不启动 dora。"""
+【设备初始化】init-device 检查环境；可信路径中的 frozen 二进制可请求固定系统配置。
+【工具子命令】list-devices / snapshot 仅操作本机相机并退出；licenses 显示内嵌许可证。"""
 
 _ROOT_EPILOG = """\
 运行模式说明:
@@ -49,15 +53,20 @@ _ROOT_EPILOG = """\
             或: REALSENSE_NODE_CONFIG=<YAML 绝对或相对路径> 同上
             从 YAML 读设备、分辨率、对齐方式等；向 dataflow 声明的 topic 发图。
 
+  源码初始化 sudo bash scripts/install_permissions.sh
+  部署初始化 realsense_camera init-device
+
   枚举设备  uv run realsense_camera list-devices
             uv run realsense_camera list-devices --json
+
+  查看许可  uv run realsense_camera licenses
 
   截帧落盘  uv run realsense_camera snapshot ...
             uv run realsense_camera snapshot --config <YAML> ...
             默认只存 Color JPEG；--all-streams 另存 Depth/IR Left/IR Right。
 
 环境:
-  仅 Linux；首次部署需 librealsense + udev（见 README 中 scripts/install_permissions.sh）。
+  仅 Linux；首次部署需 libusb/libudev 运行时与 udev 权限（见 README）。
 
 常用示例（均在本仓库根目录执行）:
   uv run realsense_camera --config config/sensor.example.yaml
@@ -102,12 +111,27 @@ _SNAPSHOT_EPILOG = """\
 """
 
 
+def _non_negative_int(value: str) -> int:
+    try:
+        result = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if result < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return result
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="realsense_camera",
         description=_ROOT_DESCRIPTION,
         epilog=_ROOT_EPILOG,
         formatter_class=_HelpFormatter,
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     parser.add_argument(
         "--config",
@@ -118,6 +142,26 @@ def _parse_args() -> argparse.Namespace:
     )
 
     subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
+
+    init_parser = subparsers.add_parser(
+        "init-device",
+        prog="realsense_camera init-device",
+        help="检查设备环境；可信安装路径中的 frozen 二进制可通过 PolicyKit 初始化系统配置",
+        formatter_class=_HelpFormatter,
+    )
+    init_parser.add_argument(
+        "--privileged",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+
+    subparsers.add_parser(
+        "licenses",
+        prog="realsense_camera licenses",
+        help="显示项目和第三方依赖许可证并退出",
+        formatter_class=_HelpFormatter,
+    )
+
     list_parser = subparsers.add_parser(
         "list-devices",
         prog="realsense_camera list-devices",
@@ -158,7 +202,7 @@ def _parse_args() -> argparse.Namespace:
     )
     snap.add_argument(
         "--device-index",
-        type=int,
+        type=_non_negative_int,
         default=None,
         metavar="N",
         help="设备索引，非负整数；与 list-devices 第一列 Index 一致。省略时为 0（未使用 --config 时）。",
@@ -256,6 +300,7 @@ def run_node(config: RealSenseConfig) -> int:
     )
     backend = create_backend(config)
     node = Node()
+    result = 0
 
     logger.info(
         "[realsense] outputs: color=%s depth=%s ir_left=%s ir_right=%s",
@@ -274,7 +319,8 @@ def run_node(config: RealSenseConfig) -> int:
                         frame = backend.capture_frame()
                     except RuntimeError as e:
                         logger.error("[realsense] capture failed: %s", e)
-                        return 1
+                        result = 1
+                        break
 
                     color_img = _frame_to_color_image(frame, config)
                     if color_img is not None:
@@ -329,15 +375,55 @@ def run_node(config: RealSenseConfig) -> int:
 
                 case "ERROR":
                     logger.error("[realsense] dora error: %s", event.get("error", "unknown"))
-                    return 1
+                    result = 1
+                    break
     finally:
-        backend.close()
-        logger.info("[realsense] closed")
-    return 0
+        try:
+            backend.close()
+        except Exception as e:
+            logger.error("[realsense] close failed: %s", e)
+            result = 1
+        else:
+            logger.info("[realsense] closed")
+    return result
 
 
-def main() -> int:
-    args = _parse_args()
+def _print_licenses() -> int:
+    """Print the license bundle embedded by the release build."""
+    from pathlib import Path
+
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root is not None:
+        candidates = [Path(frozen_root) / "THIRD_PARTY_LICENSES.txt"]
+    else:
+        project_root = Path(__file__).resolve().parents[2]
+        candidates = [
+            project_root / "build" / "pyinstaller" / "THIRD_PARTY_LICENSES.txt",
+            project_root / "LICENSE",
+        ]
+        try:
+            package_distribution = distribution("forge-devices-realsense-camera")
+            for entry in package_distribution.files or ():
+                entry_text = str(entry).replace("\\", "/")
+                if entry_text.endswith(".dist-info/licenses/LICENSE"):
+                    candidates.append(Path(str(package_distribution.locate_file(entry))))
+        except PackageNotFoundError:
+            pass
+
+    for candidate in candidates:
+        if candidate.is_file():
+            print(candidate.read_text(encoding="utf-8"), end="")
+            return 0
+    print("License information is unavailable in this installation.", file=sys.stderr)
+    return 1
+
+
+def _run_command(args: argparse.Namespace) -> int:
+    if args.command == "init-device":
+        return run_init_device(privileged=args.privileged)
+
+    if args.command == "licenses":
+        return _print_licenses()
 
     if args.command == "list-devices":
         return run_list_devices(json_output=args.json)
@@ -348,6 +434,8 @@ def main() -> int:
             device_index=args.device_index,
             device_serial=args.serial,
         )
+        if not runtime_preflight():
+            return 1
         return run_snapshot(
             config,
             args.output,
@@ -355,7 +443,19 @@ def main() -> int:
             all_streams=args.all_streams,
         )
 
-    return run_node(RealSenseConfig.load(args.config))
+    config = RealSenseConfig.load(args.config)
+    if not runtime_preflight():
+        return 1
+    return run_node(config)
+
+
+def main() -> int:
+    args = _parse_args()
+    try:
+        return _run_command(args)
+    except (OSError, RuntimeError, ValueError) as exc:
+        logger.error("realsense_camera failed: %s", exc)
+        return 1
 
 
 if __name__ == "__main__":

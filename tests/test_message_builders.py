@@ -124,9 +124,10 @@ class MessageBuilderTests(unittest.TestCase):
         backend = backend_realsense.RealSenseBackend.__new__(
             backend_realsense.RealSenseBackend
         )
-        backend._first_frame_event = threading.Event()
-        backend._first_frame_event.set()
         backend._lock = threading.Lock()
+        backend._frame_condition = threading.Condition(backend._lock)
+        backend._terminal_error = None
+        backend._thread = mock.Mock(is_alive=mock.Mock(return_value=True))
         expected = RealSenseFrame(
             color=None,
             depth=None,
@@ -207,6 +208,17 @@ class MessageBuilderTests(unittest.TestCase):
         self.assertEqual(
             realsense_snapshot._default_config_path(),
             PACKAGE_ROOT / "config" / "sensor.example.yaml",
+        )
+        packaged_config = (
+            PACKAGE_ROOT
+            / "src"
+            / "forge_devices_realsense_camera"
+            / "resources"
+            / "sensor.example.yaml"
+        )
+        self.assertEqual(
+            (PACKAGE_ROOT / "config" / "sensor.example.yaml").read_bytes(),
+            packaged_config.read_bytes(),
         )
 
 

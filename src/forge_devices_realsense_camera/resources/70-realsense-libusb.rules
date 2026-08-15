@@ -1,0 +1,16 @@
+# Intel RealSense USB permissions for forge-devices-realsense-camera.
+#
+# Product IDs are derived from librealsense v2.58.2
+# config/99-realsense-libusb.rules (Apache-2.0). This reviewed variant is
+# intentionally limited to USB-node permissions for Color/Depth/IR capture:
+# it removes upstream RUN directives, does not execute shell commands, and
+# grants access through the video group plus logind uaccess.
+
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="8086", ATTRS{idProduct}=="0a80|0a66|0aa3|0aa2|0aa5|0abf|0acb|0ad0|04b4|0ad1|0ad2|0ad3|0ad4|0ad5|0ad6|0af2|0af6|0afe|0aff|0b00|0b01|0b03|0b07|0b0c|0b0d|0b3a|0b3d|0b48|0b49|0b4b|0b4d|0b52|0b56|0b5b|0b5c|0b64|0b68|0b6a|0b6b|1155|1156", MODE:="0660", GROUP:="video", TAG+="uaccess"
+
+# Intel RealSense recovery devices (DFU).
+SUBSYSTEMS=="usb", ATTRS{idVendor}=="8086", ATTRS{idProduct}=="0ab3|0adb|0adc|0ade|0b55|0add", MODE:="0660", GROUP:="video", TAG+="uaccess"
+
+# Intel RealSense Movidius/T265 devices.
+SUBSYSTEMS=="usb", ENV{DEVTYPE}=="usb_device", ATTRS{idVendor}=="8087", ATTRS{idProduct}=="0af3|0b37", MODE:="0660", GROUP:="video", TAG+="uaccess"
+SUBSYSTEMS=="usb", ENV{DEVTYPE}=="usb_device", ATTRS{idVendor}=="03e7", ATTRS{idProduct}=="2150", MODE:="0660", GROUP:="video", TAG+="uaccess"

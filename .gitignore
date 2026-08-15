@@ -2,6 +2,12 @@
 .venv_build/
 build/
 dist/
+Log/
+sdk/
+*.tar.gz
+*.sha256
+license-output.txt
+requirements-audit.txt
 __pycache__/
 .pytest_cache/
 *.egg-info/

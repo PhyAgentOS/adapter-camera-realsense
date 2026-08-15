@@ -346,4 +346,3 @@ stereo_module:
 
   # 6 其他 Stereo Module rs.option 透传（最后写入，可覆盖上方配置）
   options: {}
-

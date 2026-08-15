@@ -6,7 +6,7 @@ This module must stay SDK-free. Concrete RealSense SDK code belongs in
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import numpy as np
@@ -25,6 +25,7 @@ class RealSenseFrame:
     ir_right: np.ndarray | None
     timestamp_ms: int = 0
     capture_timestamp_ns: int | None = None
+    capture_sequence: int = 0
 
 
 @dataclass
@@ -63,8 +64,13 @@ def depth_units_to_metres(
 class CaptureBackend(Protocol):
     """Common interface implemented by RealSense capture backends."""
 
-    def capture_frame(self) -> RealSenseFrame:
-        """Return the latest captured frame."""
+    def capture_frame(
+        self,
+        *,
+        after_sequence: int | None = None,
+        timeout_sec: float = 5.0,
+    ) -> RealSenseFrame:
+        """Return a frame, optionally waiting for one newer than ``after_sequence``."""
         ...
 
     def close(self) -> None:
@@ -80,14 +86,21 @@ def create_backend(config: RealSenseConfig) -> CaptureBackend:
     """
     from forge_common import get_logger
 
-    from .backend_realsense import RealSenseBackend, hardware_reset_devices
+    from .backend_realsense import (
+        RealSenseBackend,
+        hardware_reset_device,
+        resolve_device_serial,
+    )
 
     logger = get_logger(__name__)
+    resolved_serial = resolve_device_serial(config)
+    pinned_config = replace(config, device_serial=resolved_serial)
     try:
-        return RealSenseBackend(config)
+        return RealSenseBackend(pinned_config)
     except RuntimeError as e:
         msg = str(e).lower()
-        retryable = (
+        retryable_hint = getattr(e, "retryable", None)
+        retryable = retryable_hint if retryable_hint is not None else (
             "frame didn't arrive" in msg
             or "timed out" in msg
             or "errno=16" in msg
@@ -99,6 +112,6 @@ def create_backend(config: RealSenseConfig) -> CaptureBackend:
             "[realsense] init failed (%s); hardware_reset and retry once",
             e,
         )
-        hardware_reset_devices()
-        return RealSenseBackend(config)
+        hardware_reset_device(resolved_serial)
+        return RealSenseBackend(pinned_config)
 

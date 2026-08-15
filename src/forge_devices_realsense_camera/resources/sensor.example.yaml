@@ -1,0 +1,348 @@
+# RealSense + image_viewer 四路联调用（color / depth / ir_left / ir_right）
+# 若只需三路，可将 infrared_2.enabled 改为 false，并从 dataflow 中移除 image/ir_right。
+#
+# Intel RealSense D435 传感器节点完整配置（参考模板）
+# 参数范围来源：D435 实测（固件 5.17.0.10，Product Line: D400，USB 3.2）
+#
+# 与本目录 dataflow.yaml / dataflow_binary.yaml 配套；包内已无重复副本。
+#
+# 用法：
+#   在本目录跑 dora：dataflow 中 `args: --config realsense_camera.yaml`。
+#   仓库根调试节点：`uv run realsense_camera --config config/sensor.example.yaml`
+#
+# dora 子进程 cwd 常为 /tmp：非本示例目录运行时 `--config` 请用绝对路径。
+# tick 与 color/depth/infrared fps：改 dataflow 里 realsense.inputs.tick（见 dataflow.yaml 头注释），勿只改本文件 fps。
+#
+# ── D435 实测输出通道 ───────────────────────────────────────────────────────
+#   color        → RGB Camera，彩色图像；本节点输出 image/color
+#   depth        → Stereo Module，Z16 采集；本节点输出 image/depth（forge_msgs.Image 32FC1，float32，m）
+#   infrared[1]  → 左红外；本节点输出 image/ir_left
+#   infrared[2]  → 右红外；本节点输出 image/ir_right
+#
+# ── Color 流可用 Profile（实测）─────────────────────────────────────────────
+#   320×180 / 320×240:              6 / 30 / 60 fps
+#   424×240 / 640×360 / 640×480:    6 / 15 / 30 / 60 fps
+#   848×480 / 960×540:              6 / 15 / 30 / 60 fps
+#   1280×720:                       6 / 15 / 30 fps
+#   1920×1080:                      6 / 15 / 30 fps
+#   格式: yuyv / bgr8 / rgba8 / bgra8 / rgb8；1920×1080@30 另支持 raw16
+# 注：官方 realsense-viewer 读取 profile.is_default() 后，当前 D435 Color 默认是 640×480@30 rgb8。
+# Dora 四路联调时需使用可同时 resolve 的组合：Color/Depth/IR 均为 640×480@30。
+#
+# ── Depth 流可用 Profile（实测）─────────────────────────────────────────────
+#   256×144:             90 / 300 fps
+#   424×240 / 480×270:   6 / 15 / 30 / 60 / 90 fps
+#   640×360 / 640×480:   6 / 15 / 30 / 60 / 90 fps
+#   848×100:             100 / 300 fps
+#   848×480:             6 / 15 / 30 / 60 / 90 fps
+#   1280×720:            6 / 15 / 30 fps
+#   格式: z16（uint16 depth）
+#
+# ── Infrared 流可用 Profile（实测，左右 IR 相同）────────────────────────────
+#   424×240 / 480×270 / 640×360 / 640×480: 6 / 15 / 30 / 60 / 90 fps, y8
+#   848×100:                                100 / 300 fps, y8
+#   848×480:                                6 / 15 / 30 / 60 / 90 fps, y8
+#   1280×720:                               6 / 15 / 30 fps, y8
+#   640×400:                                15 / 25 fps, y16
+#   1280×800:                               15 / 25 fps y16；15 / 30 fps y8
+
+# ── 设备识别 ────────────────────────────────────────────────────────────────
+device_serial: null                 # 默认不绑定序列号；多设备时再填写指定 D435 serial
+device_index: 0                     # device_serial=null 时使用设备索引
+
+# ── 全局 rs.option 透传 ─────────────────────────────────────────────────────
+# 会尝试写入每个 sensor；只放所有 sensor 都安全支持的选项。
+options: {}
+
+# ── 启动参数 ────────────────────────────────────────────────────────────────
+connect_delay_ms: 0                 # 连接前等待（ms），多节点时可错开 USB 抢占
+init_timeout_sec: 20.0              # 设备初始化超时（秒）；含首帧与 option 写入缓冲
+prewarm_frames: 15                  # 启动后丢弃前 N 帧，给自动曝光/白平衡收敛时间
+
+# ── 帧对齐 ──────────────────────────────────────────────────────────────────
+# RealSense 对齐由 rs.align(rs.stream.color) 完成：
+#   disable → 保持各流原生坐标系
+#   color   → depth 对齐到 color 坐标系；depth 输出分辨率会变为 color 分辨率
+# 注意：IR 流保持原生左右目坐标系，不参与 color 对齐。
+align_to: color                     # disable / color
+
+# ── dora 输出 topic ─────────────────────────────────────────────────────────
+output_color: image/color
+output_depth: image/depth
+output_ir_left: image/ir_left
+output_ir_right: image/ir_right
+
+# ── RGB Camera（数据流 + Controls + Post-Processing）──────────────────────
+color:
+  # 1 数据流（需重启 pipeline）
+  data_flow:
+    enabled: true
+    width: 640                      # 官方 viewer 默认 profile: 640×480@30 rgb8
+    height: 480                     # 与 width 配对
+    fps: 30                         # 当前选用 30；dataflow tick 建议 millis/33
+    # format — 彩色传输格式
+    #   yuyv  → UVC YUYV，节点内 cv2 转 RGB
+    #   bgr8  → OpenCV 友好格式，节点内转 RGB 输出
+    #   rgba8 / bgra8 → 节点内去 alpha 并转 RGB
+    #   rgb8  → 官方 viewer 默认 profile；节点直接输出
+    #   raw16 → 原始 16-bit，节点归一化为灰度 RGB（仅调试/特殊 profile）
+    format: rgb8                    # yuyv / bgr8 / rgba8 / bgra8 / rgb8 / raw16
+    jpeg_quality: 85                # [1, 100]；当前 rgb8 配置不使用，保留给支持 MJPEG 的设备
+
+  # 2 Controls（RealSense Viewer: RGB Camera / Controls；通过 RGB Camera rs.option 写入）
+  controls:
+    # 曝光 / 增益
+    auto_exposure: true             # [0, 1]，默认 1；true=自动曝光
+    exposure: 166                   # [1, 10000]，step=1，默认 166；auto_exposure=true 时先写默认值再打开 AE
+    gain: 64                        # [0, 128]，step=1，默认 64；避免 sweep 后继承极端 gain
+
+    # 白平衡
+    auto_white_balance: true        # [0, 1]，默认 1；true=自动白平衡
+    white_balance: 4600             # [2800, 6500] K，step=10，默认 4600；auto_white_balance=true 时先写默认值再打开 AWB
+
+    # 图像质量（UVC 标准控制；D435 当前值/默认值来自实测）
+    brightness: 0                   # [-64, 64]，step=1，默认 0
+    contrast: 50                    # [0, 100]，step=1，默认 50
+    saturation: 64                  # [0, 100]，step=1，默认 64
+    sharpness: 50                   # [0, 100]，step=1，默认 50
+    gamma: 300                      # [100, 500]，step=1，默认 300
+    hue: 0                          # [-180, 180]，step=1，默认 0
+    backlight_compensation: 0       # [0, 1]，step=1，默认 0
+    power_line_frequency: 3         # [0, 3]：0=Disabled / 1=50Hz / 2=60Hz / 3=Auto（默认 3）
+    auto_exposure_priority: null    # Viewer: Auto Exposure Priority；[0, 1]，默认 0
+    global_time_enabled: null       # Viewer: Global Time Enabled；[0, 1]，默认 1
+
+    # 软件方向变换（节点内 cv2/numpy 后处理；不依赖硬件支持）
+    mirror: false
+    flip: false
+    rotate: 0                       # 0 / 90 / 180 / 270
+
+  # 3 Post-Processing（RealSense Viewer: RGB Camera / Post-Processing）
+  post_processing:
+    decimation_filter:
+      enabled: false
+      options:
+        filter_magnitude: 2         # Viewer: Decimation Filter / Filter Magnitude
+    rotation_filter:
+      enabled: false
+      options:
+        rotation: 0                 # Viewer: Rotation Filter / Rotation，0 / 90 / 180 / 270
+
+  # 4 其他 RGB Camera rs.option 透传（最后写入，可覆盖上方配置）
+  options: {}
+
+# ── Stereo Module（Viewer 同级结构：Depth + IR + Controls + Filters）──────
+stereo_module:
+  enabled: true                     # Viewer: Stereo Module 总开关；false 时关闭 depth/infrared_1/infrared_2
+  emitter_enabled: 1                # Viewer: Emitter Enabled；0=Off / 1=Laser / 2=Laser Auto
+  auto_exposure: true               # Viewer: Enable Auto Exposure
+
+  # 1 Resolution / Frame Rate / Available Streams（需重启 pipeline）
+  data_flow:
+    width: 640                      # 四路联调用 640×480@30；单独 depth 的官方默认 profile 是 848×480@30 z16
+    height: 480
+    fps: 30
+    streams:
+      depth:
+        enabled: true
+        format: z16                 # Viewer: Depth / Z16
+      infrared_1:
+        enabled: true
+        stream_index: 1             # Viewer: Infrared 1
+        format: y8                  # 支持 y8 / y16；需与当前分辨率和 FPS 组合匹配
+      infrared_2:
+        enabled: true               # 四路联调；若聚焦窗口冻住，属于 image_viewer 多窗口重绘问题
+        # enabled: false            # 三路联调时可关闭右 IR
+        stream_index: 2             # Viewer: Infrared 2
+        format: y8                  # 支持 y8 / y16；需与当前分辨率和 FPS 组合匹配
+
+  # 2 Controls（RealSense Viewer: Stereo Module / Controls）
+  controls:
+    visual_preset: 0                # [0, 5]：0=Custom / 1=Default / 2=Hand / 3=High Accuracy / 4=High Density / 5=Medium Density
+    exposure: 8500                  # Viewer: Exposure；[1, 165000] us，默认 8500；auto_exposure=true 时先写默认值再打开 AE
+    gain: 16                        # Viewer: Gain；[16, 248]，默认 16；避免 sweep 后继承极端 gain
+    laser_power: 150                # Viewer: Laser Power；[0, 360] mW，step=30，默认 150
+    error_polling_enabled: 0        # Viewer: Error Polling Enabled；[0, 1]，默认 0
+    output_trigger_enabled: 0       # Viewer: Output Trigger Enabled；[0, 1]，默认 0
+    depth_units: 0.001              # Viewer: Depth Units；[1e-06, 0.01] m/unit，默认 0.001
+    # stereo_baseline: read-only    # Viewer: Stereo Baseline；只读，当前不写入
+    inter_cam_sync_mode: null       # Viewer: Inter Cam Sync Mode；0=Default / 1=Master / 2=Slave / ...
+    emitter_on_off: 0               # Viewer: Emitter On Off；[0, 1]，默认 0
+    global_time_enabled: 1          # Viewer: Global Time Enabled；[0, 1]，默认 1
+    emitter_always_on: 0            # Viewer: Emitter Always On；[0, 1]，默认 0
+    hdr_enabled: 0                  # Viewer: Hdr Enabled；[0, 1]，默认 0
+    sequence_name: 1                # Viewer: Sequence Name；[0, 3]，默认 1
+    sequence_size: 2                # Viewer: Sequence Size；D435 通常固定 2
+    sequence_id: 0                  # Viewer: Sequence Id；0=UVC / 1=1 / 2=2，默认 0
+    auto_exposure_limit: 8500       # Viewer: Auto Exposure Limit；[1, 165000]，默认 8500
+    auto_gain_limit: 16             # Viewer: Auto Gain Limit；[16, 248]，默认 16
+    auto_exposure_limit_toggle: 0   # Viewer: Auto Exposure Limit Toggle；[0, 1]，默认 0
+    auto_gain_limit_toggle: 0       # Viewer: Auto Gain Limit Toggle；[0, 1]，默认 0
+
+  # 3 Advanced Controls（RealSense Viewer: Stereo Module / Advanced Controls）
+  # 这些项通过 rs400_advanced_mode JSON 写入；null 表示不覆盖当前设备值。
+  advanced_controls:
+    depth_control:
+      ds_second_peak_threshold: null       # Viewer: DS Second Peak Threshold -> param-secondpeakdelta
+      ds_neighbor_threshold: null          # Viewer: DS Neighbor Threshold -> param-neighborthresh
+      ds_median_threshold: null            # Viewer: DS Median Threshold -> param-medianthreshold
+      estimate_median_increment: null      # Viewer: Estimate Median Increment -> param-robbinsmonroincrement
+      estimate_median_decrement: null      # Viewer: Estimate Median Decrement -> param-robbinsmonrodecrement
+      score_minimum_threshold: null        # Viewer: Score Minimum Threshold -> param-minscorethresha
+      score_maximum_threshold: null        # Viewer: Score Maximum Threshold -> param-maxscorethreshb
+      ds_lr_threshold: null                # Viewer: DS LR Threshold -> param-leftrightthreshold
+      texture_count_threshold: null        # Viewer: Texture Count Threshold -> param-texturecountthresh
+      texture_difference_threshold: null   # Viewer: Texture Difference Threshold -> param-texturedifferencethresh
+
+    rsm:
+      rsm_bypass: null                     # Viewer: RSM Bypass；写入 param-usersm 的反值
+      disparity_difference_threshold: null # Viewer: Disparity Difference Threshold -> param-rsmdiffthreshold
+      slo_rau_difference_threshold: null   # Viewer: SLO RAU Difference Threshold -> param-rsmrauslodiffthreshold
+      remove_threshold: null               # Viewer: Remove Threshold -> param-rsmremovethreshold
+
+    rau_support_vector_control:
+      min_west: null                       # Viewer: Min West -> param-rauminw
+      min_east: null                       # Viewer: Min East -> param-raumine
+      min_we_sum: null                     # Viewer: Min WE Sum -> param-rauminwesum
+      min_north: null                      # Viewer: Min North -> param-rauminn
+      min_south: null                      # Viewer: Min South -> param-raumins
+      min_ns_sum: null                     # Viewer: Min NS Sum -> param-rauminnssum
+      u_shrink: null                       # Viewer: U Shrink -> param-regionshrinku
+      v_shrink: null                       # Viewer: V Shrink -> param-regionshrinkv
+
+    color_control:
+      disable_sad_color: null              # Viewer: Disable SAD Color -> param-disablesadcolor
+      disable_rau_color: null              # Viewer: Disable RAU Color -> param-disableraucolor
+      disable_slo_right_color: null        # Viewer: Disable SLO Right Color -> param-disableslorightcolor
+      disable_slo_left_color: null         # Viewer: Disable SLO Left Color -> param-disablesloleftcolor
+      disable_sad_normalize: null          # Viewer: Disable SAD Normalize -> param-disablesadnormalize
+
+    rau_color_thresholds_control:
+      diff_threshold_red: null             # Viewer: Diff Threshold Red -> param-regioncolorthresholdr
+      diff_threshold_green: null           # Viewer: Diff Threshold Green -> param-regioncolorthresholdg
+      diff_threshold_blue: null            # Viewer: Diff Threshold Blue -> param-regioncolorthresholdb
+
+    slo_color_thresholds_control:
+      diff_threshold_red: null             # Viewer: Diff Threshold Red -> param-scanlineedgetaur
+      diff_threshold_green: null           # Viewer: Diff Threshold Green -> param-scanlineedgetaug
+      diff_threshold_blue: null            # Viewer: Diff Threshold Blue -> param-scanlineedgetaub
+
+    slo_penalty_control:
+      k1_penalty: null                     # Viewer: K1 Penalty -> param-scanlinep1
+      k2_penalty: null                     # Viewer: K2 Penalty -> param-scanlinep2
+      k1_penalty_mod1: null                # Viewer: K1 Penalty Mod1 -> param-scanlinep1onediscon
+      k1_penalty_mod2: null                # Viewer: K1 Penalty Mod2 -> param-scanlinep1twodiscon
+      k2_penalty_mod1: null                # Viewer: K2 Penalty Mod1 -> param-scanlinep2onediscon
+      k2_penalty_mod2: null                # Viewer: K2 Penalty Mod2 -> param-scanlinep2twodiscon
+
+    hdad:
+      ignore_sad: null                     # Viewer: Ignore SAD -> ignoreSAD
+      ad_lambda: null                      # Viewer: AD Lambda -> param-lambdaad
+      census_lambda: null                  # Viewer: Census Lambda -> param-lambdacensus
+
+    color_correction:
+      color_correction_1: null             # Viewer: Color Correction 1 -> param-colorcorrection1
+      color_correction_2: null
+      color_correction_3: null
+      color_correction_4: null
+      color_correction_5: null
+      color_correction_6: null
+      color_correction_7: null
+      color_correction_8: null
+      color_correction_9: null
+      color_correction_10: null
+      color_correction_11: null
+      color_correction_12: null
+
+    depth_table:
+      depth_units: null                    # Viewer: Depth Units -> param-depthunits
+      depth_clamp_min: null                # Viewer: Depth Clamp Min -> param-depthclampmin
+      depth_clamp_max: null                # Viewer: Depth Clamp Max -> param-depthclampmax
+      disparity_mode: null                 # Viewer: Disparity Mode -> param-disparitymode
+      disparity_shift: null                # Viewer: Disparity Shift -> param-disparityshift
+
+    ae_control:
+      mean_intensity_set_point: null       # Viewer: Mean Intensity Set Point -> param-autoexposure-setpoint
+
+    census_enable_reg:
+      u_diameter: null                     # Viewer: u-Diameter -> param-censusenablereg-udiameter
+      v_diameter: null                     # Viewer: v-Diameter -> param-censusenablereg-vdiameter
+
+    disparity_modulation:
+      a_factor: null                       # Viewer: A Factor -> param-amplitude-factor
+
+  # 4 Post-Processing（RealSense Viewer: Stereo Module / Post-Processing）
+  post_processing:
+    decimation_filter:
+      enabled: false
+      options:
+        filter_magnitude: 2         # [1, 8]，step=1，默认 2
+
+    rotation_filter:
+      enabled: false
+      options:
+        rotation: 0                 # [-90, 180]，默认 0；常用 0 / 90 / 180
+
+    hdr_merge:
+      enabled: false                # 仅 HDR sequence 有意义
+      options:
+        frames_queue_size: null     # [0, 32]，默认 16
+
+    sequence_id_filter:
+      enabled: false
+      options:
+        sequence_id: 1              # [0, 2]，默认 1
+
+    threshold_filter:
+      enabled: false
+      options:
+        min_distance: 0.1           # [0, 16] m，step=0.1，默认 0.1
+        max_distance: 10.0          # [0, 16] m，step=0.1，默认 4.0
+
+    depth_to_disparity:
+      enabled: false
+      options: {}
+
+    spatial_filter:
+      enabled: false
+      options:
+        filter_magnitude: 2         # [1, 5]，step=1，默认 2；迭代次数
+        filter_smooth_alpha: 0.5    # [0.25, 1]，step=0.01，默认 0.5；1=无滤波
+        filter_smooth_delta: 20     # [1, 50]，step=1，默认 20；边缘保留阈值
+        holes_fill: 0               # [0, 5]，step=1，默认 0；填洞模式
+
+    temporal_filter:
+      enabled: false
+      options:
+        filter_smooth_alpha: 0.4    # [0, 1]，step=0.01，默认 0.4；1=无滤波
+        filter_smooth_delta: 20     # [1, 100]，step=1，默认 20；梯度阈值
+        persistency_index: 3        # [0, 8]，默认 3；持久化策略
+
+    hole_filling_filter:
+      enabled: false
+      options:
+        holes_fill: 1               # [0, 2]：0=fill_from_left / 1=farthest_from_around / 2=nearest_from_around
+
+    disparity_to_depth:
+      enabled: false
+      options: {}
+
+  # 5 节点侧软件处理（非 Viewer 原生 Controls）
+  software:
+    depth:
+      min_mm: 100                   # 深度下限（mm）；小于此值置 0
+      max_mm: 10000                 # 深度上限（mm）；大于此值置 0
+      mirror: false
+      flip: false
+      rotate: 0                     # 0 / 90 / 180 / 270
+    infrared_1:
+      mirror: false
+      flip: false
+      rotate: 0                     # 0 / 90 / 180 / 270
+    infrared_2:
+      mirror: false
+      flip: false
+      rotate: 0
+
+  # 6 其他 Stereo Module rs.option 透传（最后写入，可覆盖上方配置）
+  options: {}

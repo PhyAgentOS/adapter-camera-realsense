@@ -22,6 +22,14 @@ from .config import FilterConfig, InfraredSideConfig, RealSenseConfig, StreamDat
 logger = get_logger(__name__)
 
 
+class RealSenseInitializationError(RuntimeError):
+    """Initialization failure annotated with whether a reset/retry is safe."""
+
+    def __init__(self, message: str, *, retryable: bool) -> None:
+        super().__init__(message)
+        self.retryable: bool = retryable
+
+
 _FORMAT_MAP = {
     "bgr8": rs.format.bgr8,
     "bgra8": rs.format.bgra8,
@@ -207,6 +215,7 @@ class RealSenseBackend:
 
     def __init__(self, config: RealSenseConfig) -> None:
         self._config = config
+        self._resolved_serial = config.device_serial or resolve_device_serial(config)
         self._pipeline: rs.pipeline | None = None
         self._profile: rs.pipeline_profile | None = None
         self._align: rs.align | None = None
@@ -215,11 +224,15 @@ class RealSenseBackend:
         self._depth_to_disparity: object | None = None
         self._disparity_to_depth: object | None = None
         self._latest_frame: RealSenseFrame | None = None
+        self._frame_sequence = 0
         self._lock = threading.Lock()
+        self._frame_condition = threading.Condition(self._lock)
+        self._lifecycle_lock = threading.Lock()
         self._stop_event = threading.Event()
-        self._first_frame_event = threading.Event()
         self._init_done = threading.Event()
         self._init_error: str | None = None
+        self._terminal_error: str | None = None
+        self._initialized = False
         self._thread = threading.Thread(
             target=self._capture_loop,
             name="realsense-capture",
@@ -229,36 +242,79 @@ class RealSenseBackend:
 
         if not self._init_done.wait(timeout=config.init_timeout_sec):
             self._stop_event.set()
-            self.close()
-            raise RuntimeError(
+            self._raise_initialization_failure(
                 f"RealSense initialization timed out ({config.init_timeout_sec}s). "
-                "Check USB connection, librealsense packages, and udev rules."
+                "Check USB connection, librealsense packages, and udev rules.",
+                retryable=True,
             )
         if self._init_error:
-            self.close()
             err = self._init_error
+            retryable = any(
+                marker in err.lower()
+                for marker in ("frame didn't arrive", "timed out", "errno=16", "resource busy")
+            )
             if "errno=16" in err or "resource busy" in err.lower():
-                raise RuntimeError(
+                message = (
                     f"RealSense initialization failed: {err}. "
                     "Another process may still hold the camera; try: "
                     "pkill -f 'realsense_camera' && pkill -f 'dist/realsense_camera'"
-                ) from None
-            raise RuntimeError(f"RealSense initialization failed: {err}")
+                )
+            else:
+                message = f"RealSense initialization failed: {err}"
+            self._raise_initialization_failure(message, retryable=retryable)
 
-    def capture_frame(self) -> RealSenseFrame:
-        if not self._first_frame_event.wait(timeout=5.0):
-            if not self._thread.is_alive():
-                raise RuntimeError("RealSense capture thread exited before first frame.")
-            raise RuntimeError("Timed out waiting for first RealSense frame.")
-        with self._lock:
-            frame = self._latest_frame
-        if frame is None:
-            raise RuntimeError("No RealSense frame available.")
-        return frame
+    def _raise_initialization_failure(self, message: str, *, retryable: bool) -> None:
+        """Clean up without allowing a secondary close error to hide the cause."""
+        try:
+            self.close()
+        except RuntimeError as cleanup_error:
+            raise RealSenseInitializationError(
+                f"{message} Cleanup also failed: {cleanup_error}. "
+                "Automatic reset/retry is disabled while the capture worker is still alive.",
+                retryable=False,
+            ) from cleanup_error
+        raise RealSenseInitializationError(message, retryable=retryable) from None
+
+    def capture_frame(
+        self,
+        *,
+        after_sequence: int | None = None,
+        timeout_sec: float = 5.0,
+    ) -> RealSenseFrame:
+        if timeout_sec <= 0:
+            raise ValueError("timeout_sec must be > 0")
+        deadline = time.monotonic() + timeout_sec
+        with self._frame_condition:
+            while True:
+                if self._terminal_error is not None:
+                    raise RuntimeError(f"RealSense capture failed: {self._terminal_error}")
+                frame = self._latest_frame
+                if frame is not None and (
+                    after_sequence is None or frame.capture_sequence > after_sequence
+                ):
+                    return frame
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    if not self._thread.is_alive():
+                        raise RuntimeError("RealSense capture thread exited without a new frame.")
+                    if after_sequence is None:
+                        raise RuntimeError("Timed out waiting for first RealSense frame.")
+                    raise RuntimeError(
+                        "Timed out waiting for a new RealSense frame "
+                        f"after sequence {after_sequence}."
+                    )
+                self._frame_condition.wait(remaining)
 
     def close(self) -> None:
         self._stop_event.set()
+        with self._frame_condition:
+            self._latest_frame = None
+            if self._terminal_error is None:
+                self._terminal_error = "capture backend is closed"
+            self._frame_condition.notify_all()
         self._thread.join(timeout=5.0)
+        if self._thread.is_alive():
+            raise RuntimeError("RealSense capture worker did not terminate during close")
 
     def _wait_for_frames(self, timeout_ms: int, *, slice_ms: int = 500) -> object:
         """Poll wait_for_frames so close()/init timeout can interrupt promptly."""
@@ -281,24 +337,37 @@ class RealSenseBackend:
 
     def _capture_loop(self) -> None:
         try:
-            if self._config.connect_delay_ms > 0:
-                time.sleep(self._config.connect_delay_ms / 1000.0)
+            if self._stop_event.wait(self._config.connect_delay_ms / 1000.0):
+                raise RuntimeError("RealSense initialization cancelled before connect")
 
-            self._pipeline = rs.pipeline()
+            self._apply_advanced_mode_json_before_streaming()
+            if self._stop_event.is_set():
+                raise RuntimeError("RealSense initialization cancelled before pipeline start")
+
+            pipeline = rs.pipeline()
             rs_config = self._build_rs_config()
-            self._profile = self._pipeline.start(rs_config)
+            with self._lifecycle_lock:
+                if self._stop_event.is_set():
+                    raise RuntimeError("RealSense initialization cancelled before pipeline start")
+                self._pipeline = pipeline
+                self._profile = pipeline.start(rs_config)
+
             self._apply_sensor_options()
-            self._apply_advanced_mode_json()
             self._depth_scale = self._read_depth_scale()
             self._filters = self._build_filters()
             self._align = rs.align(rs.stream.color) if self._config.align_to == "color" else None
 
             # Option writes after start can stall streaming briefly.
-            time.sleep(0.2)
-            for i in range(max(0, self._config.prewarm_frames)):
+            if self._stop_event.wait(0.2):
+                raise RuntimeError("RealSense initialization cancelled during option settling")
+            for i in range(self._config.prewarm_frames):
                 # First frames after reopen need a longer budget.
                 self._wait_for_frames(10000 if i == 0 else 3000)
 
+            # Initialization is successful only once a post-prewarm frameset has
+            # survived alignment and conversion and is available to consumers.
+            self._capture_and_publish(self._wait_for_frames(10000))
+            self._initialized = True
             self._init_done.set()
 
             while not self._stop_event.is_set():
@@ -310,33 +379,47 @@ class RealSenseBackend:
                     if self._is_disconnect_error(e):
                         raise
                     continue
-                if not frames:
-                    continue
-                capture_timestamp_ns = time.time_ns()
-                if self._align is not None:
-                    frames = self._align.process(frames)
-                frame = self._convert_frameset(frames)
-                frame.capture_timestamp_ns = capture_timestamp_ns
-                with self._lock:
-                    self._latest_frame = frame
-                self._first_frame_event.set()
+                if frames:
+                    self._capture_and_publish(frames)
         except Exception as e:
-            self._init_error = str(e)
+            error = str(e)
+            if not self._initialized:
+                self._init_error = error
+            self._record_terminal_error(error)
             self._init_done.set()
-            self._first_frame_event.set()
         finally:
             if self._pipeline is not None:
                 try:
                     self._pipeline.stop()
                 except RuntimeError:
                     pass
+            if not self._init_done.is_set():
+                self._init_error = "RealSense initialization stopped before first converted frame"
+                self._record_terminal_error(self._init_error)
+                self._init_done.set()
+
+    def _capture_and_publish(self, frames: object) -> None:
+        capture_timestamp_ns = time.time_ns()
+        if self._align is not None:
+            frames = self._align.process(frames)
+        frame = self._convert_frameset(frames)
+        frame.capture_timestamp_ns = capture_timestamp_ns
+        with self._frame_condition:
+            self._frame_sequence += 1
+            frame.capture_sequence = self._frame_sequence
+            self._latest_frame = frame
+            self._frame_condition.notify_all()
+
+    def _record_terminal_error(self, error: str) -> None:
+        with self._frame_condition:
+            self._terminal_error = error
+            self._latest_frame = None
+            self._frame_condition.notify_all()
 
     def _build_rs_config(self) -> rs.config:
         cfg = self._config
         rs_config = rs.config()
-        serial = cfg.device_serial or self._serial_by_index(cfg.device_index)
-        if serial:
-            rs_config.enable_device(serial)
+        rs_config.enable_device(self._resolved_serial)
 
         if cfg.color.data_flow.enabled:
             self._enable_video_stream(rs_config, rs.stream.color, cfg.color.data_flow)
@@ -369,47 +452,62 @@ class RealSenseBackend:
             stream.fps,
         )
 
-    @staticmethod
-    def _serial_by_index(index: int) -> str | None:
-        ctx = rs.context()
-        devices = list(ctx.query_devices())
-        if not devices:
-            raise RuntimeError("No RealSense device found.")
-        if index < 0 or index >= len(devices):
-            raise RuntimeError(f"RealSense device_index {index} out of range, found {len(devices)} device(s).")
-        device = devices[index]
-        if device.supports(rs.camera_info.serial_number):
-            return str(device.get_info(rs.camera_info.serial_number))
-        return None
-
-    def _apply_advanced_mode_json(self) -> None:
+    def _apply_advanced_mode_json_before_streaming(self) -> None:
         updates = self._advanced_mode_parameter_updates()
         if not self._config.advanced_mode_json and not updates:
             return
-        if self._profile is None:
-            return
+
         payload: dict[str, Any] | None = None
         path: Path | None = None
         if self._config.advanced_mode_json:
             path = Path(self._config.advanced_mode_json)
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        device = self._profile.get_device()
+            try:
+                loaded = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as e:
+                raise RuntimeError(f"advanced_mode_json {path}: {e}") from e
+            if not isinstance(loaded, dict):
+                raise ValueError("advanced_mode_json root must be a mapping")
+            payload = loaded
+
+        device = _device_by_serial(self._resolved_serial)
         try:
             advanced = rs.rs400_advanced_mode(device)
             if not advanced.is_enabled():
                 advanced.toggle_advanced_mode(True)
-                time.sleep(1.0)
+                # The old USB enumeration can remain visible briefly after toggle.
+                if self._stop_event.wait(1.0):
+                    raise RuntimeError(
+                        "initialization cancelled while enabling advanced mode"
+                    )
+                device = _wait_for_device_by_serial(
+                    self._resolved_serial,
+                    stop_event=self._stop_event,
+                    timeout_sec=min(10.0, self._config.init_timeout_sec),
+                )
+                advanced = rs.rs400_advanced_mode(device)
+                if not advanced.is_enabled():
+                    raise RuntimeError("advanced mode did not become enabled after device reconnect")
             if payload is None:
-                payload = json.loads(advanced.serialize_json())
+                current = json.loads(advanced.serialize_json())
+                if not isinstance(current, dict):
+                    raise ValueError("device advanced mode JSON root is not a mapping")
+                payload = current
             parameters = payload.setdefault("parameters", {})
             if not isinstance(parameters, dict):
                 raise ValueError("advanced mode JSON parameters must be a mapping")
             parameters.update(updates)
             advanced.load_json(json.dumps(payload))
-            source = str(path) if path is not None else "current device settings"
-            logger.info("[realsense] loaded advanced mode settings from %s; overrides=%d", source, len(updates))
         except Exception as e:
-            logger.warning("[realsense] advanced mode settings failed: %s", e)
+            raise RuntimeError(
+                f"advanced mode settings failed for device {self._resolved_serial}: {e}"
+            ) from e
+
+        source = str(path) if path is not None else "current device settings"
+        logger.info(
+            "[realsense] loaded advanced mode settings from %s; overrides=%d",
+            source,
+            len(updates),
+        )
 
     def _advanced_mode_parameter_updates(self) -> dict[str, Any]:
         updates: dict[str, Any] = {}
@@ -417,8 +515,7 @@ class RealSenseBackend:
             if raw_group is None:
                 continue
             if not isinstance(raw_group, dict):
-                logger.warning("[realsense] advanced_controls.%s must be a mapping, skip", group_name)
-                continue
+                raise ValueError(f"advanced_controls.{group_name} must be a mapping")
             group_key = _advanced_key(group_name)
             for field_name, value in raw_group.items():
                 if value is None:
@@ -433,12 +530,17 @@ class RealSenseBackend:
                 field_key = _advanced_key(field_name)
                 alias_key = (group_key, field_key)
                 if alias_key in _ADVANCED_MODE_INVERTED_ALIASES:
-                    updates[_ADVANCED_MODE_INVERTED_ALIASES[alias_key]] = 0 if bool(value) else 1
+                    if not isinstance(value, bool):
+                        raise ValueError(
+                            f"advanced control {group_name}.{field_name} must be a boolean"
+                        )
+                    updates[_ADVANCED_MODE_INVERTED_ALIASES[alias_key]] = 0 if value else 1
                     continue
                 json_key = _ADVANCED_MODE_PARAMETER_ALIASES.get(alias_key)
                 if json_key is None:
-                    logger.warning("[realsense] unknown advanced control %s.%s, skip", group_name, field_name)
-                    continue
+                    raise ValueError(
+                        f"unknown advanced control {group_name}.{field_name}"
+                    )
                 updates[json_key] = value
         return updates
 
@@ -447,26 +549,28 @@ class RealSenseBackend:
             return
         cfg = self._config
         device = self._profile.get_device()
+        ir_enabled = cfg.infrared.left.enabled or cfg.infrared.right.enabled
         for sensor in device.sensors:
             _set_options(sensor, cfg.options)
 
             if cfg.color.data_flow.enabled and _sensor_has_stream(sensor, rs.stream.color):
                 _set_options(sensor, self._color_options())
 
-            # Stereo Module exposes depth + IR on one sensor. Apply depth controls
-            # once here; IR-only option maps are for non-stereo layouts.
-            if cfg.depth.data_flow.enabled and _sensor_has_stream(sensor, rs.stream.depth):
-                _set_options(sensor, self._depth_options())
-            elif (
-                (cfg.infrared.left.enabled or cfg.infrared.right.enabled)
-                and _sensor_has_stream(sensor, rs.stream.infrared)
-            ):
-                options = dict(cfg.infrared.options)
+            has_depth = _sensor_has_stream(sensor, rs.stream.depth)
+            has_ir = _sensor_has_stream(sensor, rs.stream.infrared)
+            stereo_options: dict[str, Any] = {}
+            # RealSense stereo modules expose depth and IR from one sensor. Merge
+            # their controls and write each option map once, including IR-only mode.
+            if has_depth and (cfg.depth.data_flow.enabled or ir_enabled):
+                stereo_options.update(self._depth_options())
+            if has_ir and ir_enabled:
+                stereo_options.update(cfg.infrared.options)
                 if cfg.infrared.left.enabled:
-                    options.update(cfg.infrared.left.options)
+                    stereo_options.update(cfg.infrared.left.options)
                 if cfg.infrared.right.enabled:
-                    options.update(cfg.infrared.right.options)
-                _set_options(sensor, options)
+                    stereo_options.update(cfg.infrared.right.options)
+            if stereo_options:
+                _set_options(sensor, stereo_options)
 
     def _color_options(self) -> dict[str, Any]:
         c = self._config.color.control
@@ -735,26 +839,73 @@ class RealSenseBackend:
         )
 
 
-def hardware_reset_devices() -> None:
-    """Issue a firmware-level reset for all connected RealSense devices.
+def _device_serial(device: object) -> str | None:
+    try:
+        if device.supports(rs.camera_info.serial_number):
+            return str(device.get_info(rs.camera_info.serial_number))
+    except RuntimeError:
+        return None
+    return None
 
-    Rapid stop/start on some D400 units leaves the USB streaming endpoint wedged
-    until a hardware reset; callers should wait a few seconds afterwards.
-    """
-    ctx = rs.context()
-    devices = list(ctx.query_devices())
-    if not devices:
-        logger.warning("[realsense] hardware_reset: no devices found")
-        return
-    for device in devices:
-        serial = ""
+
+def _device_by_serial(serial: str) -> object:
+    for device in list(rs.context().query_devices()):
+        if _device_serial(device) == serial:
+            return device
+    raise RuntimeError(f"RealSense device with serial {serial!r} was not found")
+
+
+def _wait_for_device_by_serial(
+    serial: str,
+    *,
+    stop_event: threading.Event,
+    timeout_sec: float,
+) -> object:
+    deadline = time.monotonic() + timeout_sec
+    while not stop_event.is_set():
         try:
-            if device.supports(rs.camera_info.serial_number):
-                serial = str(device.get_info(rs.camera_info.serial_number))
-            device.hardware_reset()
-            logger.warning("[realsense] hardware_reset issued for %s", serial or "?")
-        except RuntimeError as e:
-            logger.warning("[realsense] hardware_reset failed for %s: %s", serial or "?", e)
+            return _device_by_serial(serial)
+        except RuntimeError:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            stop_event.wait(min(0.1, remaining))
+    if stop_event.is_set():
+        raise RuntimeError("RealSense initialization cancelled while reacquiring device")
+    raise RuntimeError(
+        f"RealSense device {serial!r} did not reappear within {timeout_sec:g}s"
+    )
+
+
+def resolve_device_serial(config: RealSenseConfig) -> str:
+    """Resolve an index once so all initialization attempts stay on one device."""
+    if config.device_serial:
+        return str(config.device_serial)
+    devices = list(rs.context().query_devices())
+    if not devices:
+        raise RuntimeError("No RealSense device found.")
+    if config.device_index < 0 or config.device_index >= len(devices):
+        raise RuntimeError(
+            f"RealSense device_index {config.device_index} out of range, "
+            f"found {len(devices)} device(s)."
+        )
+    serial = _device_serial(devices[config.device_index])
+    if not serial:
+        raise RuntimeError(
+            f"RealSense device_index {config.device_index} has no readable serial number; "
+            "cannot safely pin initialization retries"
+        )
+    return serial
+
+
+def hardware_reset_device(serial: str) -> None:
+    """Reset only the selected device and wait for USB re-enumeration."""
+    device = _device_by_serial(serial)
+    try:
+        device.hardware_reset()
+    except RuntimeError as e:
+        raise RuntimeError(f"hardware_reset failed for {serial}: {e}") from e
+    logger.warning("[realsense] hardware_reset issued for %s", serial)
     time.sleep(4.0)
 
 
@@ -785,5 +936,10 @@ def list_realsense_devices() -> list[DeviceInfo]:
     return result
 
 
-__all__ = ["RealSenseBackend", "list_realsense_devices"]
+__all__ = [
+    "RealSenseBackend",
+    "hardware_reset_device",
+    "list_realsense_devices",
+    "resolve_device_serial",
+]
 

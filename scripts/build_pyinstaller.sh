@@ -124,7 +124,7 @@ PY
 VERSION_OUTPUT="${WORK_DIR}/version-output.txt"
 LICENSE_OUTPUT="${WORK_DIR}/license-output.txt"
 "${BINARY}" --version > "${VERSION_OUTPUT}"
-grep -q '1.0.0' "${VERSION_OUTPUT}"
+grep -q '1.1.0' "${VERSION_OUTPUT}"
 "${BINARY}" licenses > "${LICENSE_OUTPUT}"
 grep -q 'Apache License' "${LICENSE_OUTPUT}"
 grep -q 'dora-rs 0.4.1' "${LICENSE_OUTPUT}"

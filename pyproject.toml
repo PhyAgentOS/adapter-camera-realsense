@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "forge-devices-realsense-camera"
-version = "1.0.0"
+version = "1.1.0"
 description = "Linux Intel RealSense depth camera capture and Dora streaming node."
 readme = "README.md"
 requires-python = ">=3.11"

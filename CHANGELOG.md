@@ -6,9 +6,16 @@ The project follows Semantic Versioning. Dates use the `YYYY-MM-DD` format.
 
 ## Unreleased
 
+## 1.1.0 - 2026-08-22
+
 ### Added
 
-- Added optional Forge PointCloud v1 Dora output with organized XYZ/XYZRGB semantics, reference configuration, hardware-validation routing and `PointCloudView` sink decoding, and PyInstaller packaging support.
+- Added optional Forge PointCloud v1 Dora output with organized XYZ/XYZRGB semantics, explicit optical-frame metadata, invalid-point handling, reference configuration, hardware-validation routing, `PointCloudView` sink decoding, and PyInstaller packaging support.
+- Added immutable SDK-buffer detachment and low-copy `PointCloudBatch` publishing so high-throughput producers avoid Python lists and redundant Arrow payload copies.
+
+### Changed
+
+- Updated the public dependency to `forge-msgs==1.1.0` and isolated optional point-cloud setup, conversion, and publishing failures from existing Color, Depth, and IR outputs.
 
 ### Removed
 

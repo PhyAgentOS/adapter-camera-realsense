@@ -54,7 +54,7 @@ The public archive filename is exactly:
 realsense_camera-v<version>-linux-x86_64-glibc<minimum>.tar.gz
 ```
 
-For version 1.0.0, the selected and tested release-host baseline is glibc 2.39. The archive is therefore named `realsense_camera-v1.0.0-linux-x86_64-glibc2.39.tar.gz`. The complete payload currently has a highest symbol requirement of `GLIBC_2.29`, but this project does not claim compatibility with hosts older than glibc 2.39.
+For version 1.1.0, the selected and tested release-host baseline remains glibc 2.39. The archive is therefore named `realsense_camera-v1.1.0-linux-x86_64-glibc2.39.tar.gz`. The complete payload currently has a highest symbol requirement of `GLIBC_2.29`, but this project does not claim compatibility with hosts older than glibc 2.39.
 
 The archive must contain exactly one non-directory entry, the executable named `realsense_camera`. Project and third-party license text must be embedded and available through `realsense_camera licenses`; do not add a separate license file, configuration, checksum, test utility, capture, or directory to the archive.
 
@@ -63,7 +63,7 @@ Create and verify the archive with an empty staging directory. These checks are 
 ```bash
 stage="$(mktemp -d)"
 install -m 0755 dist/realsense_camera "$stage/realsense_camera"
-archive="realsense_camera-v1.0.0-linux-x86_64-glibc2.39.tar.gz"
+archive="realsense_camera-v1.1.0-linux-x86_64-glibc2.39.tar.gz"
 tar --sort=name \
   --owner=0 --group=0 --numeric-owner \
   --mtime='UTC 1970-01-01' \
@@ -88,8 +88,8 @@ Use version-matched PyInstaller inspection/extraction tooling in a disposable di
 3. Run `readelf -d` and review `NEEDED`, `RPATH`, and `RUNPATH`; reject missing dependencies and unsafe search paths.
 4. Run `readelf --version-info` and `objdump -T` to inventory required `GLIBC_*`, `GLIBCXX_*`, and `CXXABI_*` symbol versions.
 5. Run `ldd` in a controlled release image and reject every `not found` result. Treat `ldd` output as a runtime check, not as a substitute for symbol-version inspection.
-6. Determine and record the highest required `GLIBC_*` version across the complete extracted ELF set. For 1.0.0 this is `GLIBC_2.29`; it is audit evidence, not the advertised compatibility floor.
-7. Smoke-test `--version`, `licenses`, `init-device`, device enumeration, and a real snapshot on the selected release-host baseline. For 1.0.0 that baseline is Linux x86_64 with glibc 2.39.
+6. Determine and record the highest required `GLIBC_*` version across the complete extracted ELF set. For 1.1.0 this is `GLIBC_2.29`; it is audit evidence, not the advertised compatibility floor.
+7. Smoke-test `--version`, `licenses`, `init-device`, device enumeration, and a real snapshot on the selected release-host baseline. For 1.1.0 that baseline is Linux x86_64 with glibc 2.39.
 
 Record the build host, compiler/build tooling, Python and PyInstaller versions, full ELF inventory, per-object symbol requirements, selected release-host baseline, and hardware test result. If the bundled payload cannot be completely extracted and audited, do not release it.
 

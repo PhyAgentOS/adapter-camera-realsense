@@ -73,7 +73,7 @@ jobs:
       - name: Smoke-test executable and embedded licenses
         run: |
           dist/realsense_camera --version | tee version-output.txt
-          grep -q '1.0.0' version-output.txt
+          grep -q '1.1.0' version-output.txt
           dist/realsense_camera licenses > license-output.txt
           grep -q 'Apache License' license-output.txt
           grep -q 'X-ERA' license-output.txt

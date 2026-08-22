@@ -4,7 +4,7 @@ Intel RealSense 深度相机的 Python 采集包与 Dora 节点，主要面向 L
 系列。项目支持 Color、Depth、左右 Infrared、可选 Forge PointCloud v1、设备枚举、快照和
 PyInstaller 单文件发布。
 
-- 版本：`1.0.0`
+- 版本：`1.1.0`
 - 许可证：Apache-2.0
 - 公共仓库：<https://github.com/Forgelab-Robotics/adapter-camera-realsense>
 - 默认分支：`master`
@@ -164,8 +164,8 @@ dist/realsense_camera --version
 dist/realsense_camera licenses
 ```
 
-构建产物为 `dist/realsense_camera`。1.0.0 发布归档名为
-`realsense_camera-v1.0.0-linux-x86_64-glibc2.39.tar.gz`。glibc 2.39 是本项目选定并实测的
+构建产物为 `dist/realsense_camera`。1.1.0 发布归档名为
+`realsense_camera-v1.1.0-linux-x86_64-glibc2.39.tar.gz`。glibc 2.39 是本项目选定并实测的
 发布主机基线；完整 payload 的 ELF 审计最高要求为 `GLIBC_2.29`，但项目不据此声明支持
 低于 glibc 2.39 的系统。审计和发布流程见 `RELEASING.md`。
 

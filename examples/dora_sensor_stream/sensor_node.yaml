@@ -9,6 +9,12 @@ output_color: image/color
 output_depth: image/depth
 output_ir_left: image/ir_left
 output_ir_right: image/ir_right
+output_point_cloud: point_cloud
+
+point_cloud:
+  enabled: true
+  colorize: true
+  frame_id: null
 
 color:
   data_flow:

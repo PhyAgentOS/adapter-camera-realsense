@@ -6,6 +6,7 @@ nodes:
     outputs:
       - image/color
       - image/depth
+      - point_cloud
       - image/ir_left
       # sensor_node.yaml 默认关闭 infrared.right；需要右 IR 时两边一起打开
       # - image/ir_right
@@ -16,6 +17,7 @@ nodes:
     inputs:
       image/color: realsense_camera/image/color
       image/depth: realsense_camera/image/depth
+      point_cloud: realsense_camera/point_cloud
       image/ir_left: realsense_camera/image/ir_left
       # image/ir_right: realsense_camera/image/ir_right
     args: run --project ../.. python test_sink.py --config test_sink.yaml

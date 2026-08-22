@@ -15,9 +15,22 @@ if TYPE_CHECKING:
     from .config import RealSenseConfig
 
 
+@dataclass(frozen=True)
+class RealSensePointCloud:
+    """SDK-independent, immutable organized point-cloud columns."""
+
+    width: int
+    height: int
+    is_dense: bool
+    x: np.ndarray
+    y: np.ndarray
+    z: np.ndarray
+    rgb: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+
+
 @dataclass
 class RealSenseFrame:
-    """One capture cycle of RealSense image streams."""
+    """One capture cycle of RealSense image and derived point-cloud streams."""
 
     color: np.ndarray | None
     depth: np.ndarray | None
@@ -26,6 +39,7 @@ class RealSenseFrame:
     timestamp_ms: int = 0
     capture_timestamp_ns: int | None = None
     capture_sequence: int = 0
+    point_cloud: RealSensePointCloud | None = None
 
 
 @dataclass

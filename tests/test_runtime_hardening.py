@@ -106,6 +106,38 @@ class SnapshotHardeningTests(unittest.TestCase):
         written = write_jpeg.call_args.args[0]
         self.assertEqual(float(written.mean()), 0.0)
 
+    def test_snapshot_disables_unused_point_cloud_generation(self) -> None:
+        config = RealSenseConfig()
+        config.point_cloud.enabled = True
+        backend = mock.Mock()
+        backend.capture_frame.side_effect = [
+            RealSenseFrame(None, None, None, None, capture_sequence=1),
+            RealSenseFrame(None, None, None, None, capture_sequence=2),
+            RealSenseFrame(
+                np.zeros((2, 2, 3), dtype=np.uint8),
+                None,
+                None,
+                None,
+                capture_sequence=3,
+            ),
+        ]
+
+        with (
+            mock.patch.object(snapshot, "create_backend", return_value=backend) as create,
+            mock.patch.object(snapshot, "_write_color_jpeg"),
+        ):
+            result = snapshot.run_snapshot(
+                config,
+                "snapshot.jpg",
+                jpeg_quality=None,
+                all_streams=False,
+            )
+
+        self.assertEqual(result, 0)
+        self.assertTrue(config.point_cloud.enabled)
+        captured_config = create.call_args.args[0]
+        self.assertFalse(captured_config.point_cloud.enabled)
+
     def test_snapshot_returns_failure_when_backend_creation_fails(self) -> None:
         with mock.patch.object(
             snapshot,
@@ -186,6 +218,62 @@ class SnapshotHardeningTests(unittest.TestCase):
 
 
 class ConfigurationHardeningTests(unittest.TestCase):
+    def test_point_cloud_defaults_to_disabled(self) -> None:
+        config = RealSenseConfig()
+
+        self.assertFalse(config.point_cloud.enabled)
+        self.assertTrue(config.point_cloud.colorize)
+        self.assertIsNone(config.point_cloud.frame_id)
+        self.assertEqual(config.output_point_cloud, "point_cloud")
+
+    def test_point_cloud_config_requires_depth_and_color_when_enabled(self) -> None:
+        with self.assertRaisesRegex(ValueError, "point_cloud.enabled.*depth"):
+            RealSenseConfig.from_dict(
+                {
+                    "depth": {"data_flow": {"enabled": False}},
+                    "point_cloud": {"enabled": True},
+                }
+            )
+
+        with self.assertRaisesRegex(ValueError, "point_cloud.colorize.*color"):
+            RealSenseConfig.from_dict(
+                {
+                    "align_to": "disable",
+                    "color": {"data_flow": {"enabled": False}},
+                    "point_cloud": {"enabled": True, "colorize": True},
+                }
+            )
+
+    def test_xyz_point_cloud_allows_color_disabled_and_normalizes_frame_id(self) -> None:
+        config = RealSenseConfig.from_dict(
+            {
+                "align_to": "disable",
+                "color": {"data_flow": {"enabled": False}},
+                "point_cloud": {
+                    "enabled": True,
+                    "colorize": False,
+                    "frame_id": "  camera_depth_optical_frame  ",
+                },
+            }
+        )
+
+        self.assertTrue(config.point_cloud.enabled)
+        self.assertFalse(config.point_cloud.colorize)
+        self.assertEqual(
+            config.point_cloud.frame_id,
+            "camera_depth_optical_frame",
+        )
+
+    def test_point_cloud_booleans_and_frame_id_are_strict(self) -> None:
+        with self.assertRaisesRegex(ValueError, "point_cloud.enabled"):
+            RealSenseConfig.from_dict(
+                {"point_cloud": {"enabled": "yes"}}
+            )
+        with self.assertRaisesRegex(ValueError, "point_cloud.frame_id"):
+            RealSenseConfig.from_dict(
+                {"point_cloud": {"frame_id": "  "}}
+            )
+
     def test_canonical_false_string_is_not_truthy(self) -> None:
         config = RealSenseConfig.from_dict(
             {
@@ -506,6 +594,100 @@ class DeviceLifecycleTests(unittest.TestCase):
 
         exposure_writes = [options for options in applied if options.get("exposure") == 123.0]
         self.assertEqual(len(exposure_writes), 1)
+
+    def test_point_cloud_failure_does_not_drop_image_streams(self) -> None:
+        backend = backend_realsense.RealSenseBackend.__new__(
+            backend_realsense.RealSenseBackend
+        )
+        backend._config = RealSenseConfig()
+        backend._config.point_cloud.enabled = True
+        backend._point_cloud = mock.sentinel.point_cloud_processor
+        color = np.zeros((2, 2, 3), dtype=np.uint8)
+        depth = np.ones((2, 2), dtype=np.float32)
+        ir = np.zeros((2, 2), dtype=np.uint8)
+        processed_depth = mock.sentinel.processed_depth
+        color_frame = mock.sentinel.color_frame
+        backend._extract_color_source = mock.Mock(
+            return_value=(color_frame, color)
+        )
+        backend._prepare_color_output = mock.Mock(return_value=color)
+        backend._process_depth_frame = mock.Mock(return_value=processed_depth)
+        backend._depth_frame_to_metres = mock.Mock(return_value=depth)
+        backend._extract_point_cloud = mock.Mock(
+            side_effect=RuntimeError("projection failed")
+        )
+        backend._orient_depth = mock.Mock(return_value=depth)
+        backend._extract_ir = mock.Mock(return_value=(ir, None))
+        frames = mock.Mock()
+        frames.get_color_frame.return_value = None
+        frames.get_depth_frame.return_value = None
+
+        frame = backend._convert_frameset(frames)
+
+        self.assertIs(frame.color, color)
+        self.assertIs(frame.depth, depth)
+        self.assertIs(frame.ir_left, ir)
+        self.assertIsNone(frame.point_cloud)
+        backend._process_depth_frame.assert_called_once_with(frames)
+        backend._extract_point_cloud.assert_called_once_with(
+            processed_depth,
+            depth,
+            color_frame,
+            color,
+        )
+        backend._extract_color_source.assert_called_once_with(frames)
+        backend._prepare_color_output.assert_called_once_with(color)
+
+    def test_point_cloud_maps_color_before_calculating_processed_depth(self) -> None:
+        backend = backend_realsense.RealSenseBackend.__new__(
+            backend_realsense.RealSenseBackend
+        )
+        backend._config = RealSenseConfig()
+        backend._config.point_cloud.enabled = True
+        processor = mock.Mock()
+        points = mock.Mock()
+        points.get_vertices.return_value = np.array(
+            [(0.0, 0.0, 1.0)],
+            dtype=[("x", "<f4"), ("y", "<f4"), ("z", "<f4")],
+        )
+        points.get_texture_coordinates.return_value = np.array(
+            [(0.0, 0.0)],
+            dtype=[("u", "<f4"), ("v", "<f4")],
+        )
+        processor.calculate.return_value = points
+        backend._point_cloud = processor
+        depth_frame = mock.sentinel.processed_depth_frame
+        color_frame = mock.sentinel.color_frame
+
+        cloud = backend._extract_point_cloud(
+            depth_frame,
+            np.ones((1, 1), dtype=np.float32),
+            color_frame,
+            np.array([[[1, 2, 3]]], dtype=np.uint8),
+        )
+
+        self.assertIsNotNone(cloud)
+        self.assertEqual(
+            processor.method_calls[:2],
+            [mock.call.map_to(color_frame), mock.call.calculate(depth_frame)],
+        )
+
+    def test_point_cloud_processor_setup_failure_is_non_fatal(self) -> None:
+        with mock.patch.object(
+            backend_realsense.rs,
+            "pointcloud",
+            side_effect=RuntimeError("unsupported"),
+        ):
+            processor = backend_realsense._create_point_cloud_processor(True)
+
+        self.assertIsNone(processor)
+
+    def test_point_cloud_processor_is_not_created_when_disabled(self) -> None:
+        with mock.patch.object(backend_realsense.rs, "pointcloud") as factory:
+            processor = backend_realsense._create_point_cloud_processor(False)
+
+        self.assertIsNone(processor)
+        factory.assert_not_called()
 
     def test_unknown_requested_advanced_control_fails(self) -> None:
         backend = backend_realsense.RealSenseBackend.__new__(

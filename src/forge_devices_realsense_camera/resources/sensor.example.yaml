@@ -71,6 +71,18 @@ output_color: image/color
 output_depth: image/depth
 output_ir_left: image/ir_left
 output_ir_right: image/ir_right
+output_point_cloud: point_cloud
+
+# ── Forge PointCloud v1（可选，默认关闭）─────────────────────────────────────
+# enabled=true 依赖 Depth；colorize=true 还依赖 Color。
+# organized XYZ 为 float32 米制、按 Depth 网格逐行排列；无效槽位的 XYZ 均为 NaN。
+# colorize=true 时 RGB 为 uint8，无法映射的 RGB 为黑色；false 时 RGB 数组为空。
+# align_to=color 使用 Color optical frame；disable 使用 Depth optical frame。
+# 软件图像方向只重排 organized 槽位，不变换 XYZ 坐标向量。
+point_cloud:
+  enabled: false
+  colorize: true
+  frame_id: null                     # null 时不附加 frame_id metadata
 
 # ── RGB Camera（数据流 + Controls + Post-Processing）──────────────────────
 color:

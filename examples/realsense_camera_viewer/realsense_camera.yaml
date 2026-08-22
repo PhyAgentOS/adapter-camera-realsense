@@ -1,4 +1,5 @@
 # RealSense + image_viewer 四路联调用（color / depth / ir_left / ir_right）
+# image_viewer 不能消费 Forge PointCloud v1，因此本示例必须保持 point_cloud.enabled=false。
 # 若只需三路，可将 infrared_2.enabled 改为 false，并从 dataflow 中移除 image/ir_right。
 #
 # Intel RealSense D435 传感器节点完整配置（参考模板）
@@ -71,6 +72,13 @@ output_color: image/color
 output_depth: image/depth
 output_ir_left: image/ir_left
 output_ir_right: image/ir_right
+output_point_cloud: point_cloud
+
+# ── Forge PointCloud v1（image_viewer 不支持，保持关闭）───────────────────────
+point_cloud:
+  enabled: false
+  colorize: true
+  frame_id: null
 
 # ── RGB Camera（数据流 + Controls + Post-Processing）──────────────────────
 color:

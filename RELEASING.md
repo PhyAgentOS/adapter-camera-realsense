@@ -30,7 +30,7 @@ Before creating a tag:
 
 1. Confirm `pyproject.toml`, `uv.lock`, `README.md`, and `CHANGELOG.md` agree on the version and requirements.
 2. Confirm the `master` working tree is clean and all CI jobs pass.
-3. Confirm `dora-rs==0.4.1`, `forge-common==1.0.1`, and `forge-msgs==1.0.1` resolve from public PyPI.
+3. Confirm `dora-rs==0.4.1`, `forge-common==1.0.1`, and `forge-msgs==1.1.0` resolve from public PyPI.
 4. Create an immutable annotated tag named `v<version>` at the validated commit.
 
 Do not store PyPI or repository tokens in this repository. Published package versions and public release tags must never be replaced.

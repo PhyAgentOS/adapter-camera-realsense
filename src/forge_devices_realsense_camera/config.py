@@ -126,6 +126,13 @@ class PostProcessingConfig:
 
 
 @dataclass
+class PointCloudConfig:
+    enabled: bool = False
+    colorize: bool = True
+    frame_id: str | None = None
+
+
+@dataclass
 class RealSenseConfig:
     device_serial: str | None = None
     device_index: int = 0
@@ -143,6 +150,8 @@ class RealSenseConfig:
     depth: DepthConfig = field(default_factory=DepthConfig)
     infrared: InfraredConfig = field(default_factory=InfraredConfig)
     post_processing: PostProcessingConfig = field(default_factory=PostProcessingConfig)
+    output_point_cloud: str = "point_cloud"
+    point_cloud: PointCloudConfig = field(default_factory=PointCloudConfig)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RealSenseConfig":
@@ -586,6 +595,24 @@ class RealSenseConfig:
         if align_to not in ("disable", "color"):
             raise ValueError(f"align_to must be disable/color, got {align_to!r}")
 
+        point_cloud_raw = _dict(data.get("point_cloud"), key="point_cloud")
+        raw_frame_id = point_cloud_raw.get("frame_id")
+        if raw_frame_id is not None:
+            if not isinstance(raw_frame_id, str) or not raw_frame_id.strip():
+                raise ValueError("point_cloud.frame_id must be a non-empty string or null")
+            raw_frame_id = raw_frame_id.strip()
+        point_cloud = PointCloudConfig(
+            enabled=_bool(
+                point_cloud_raw.get("enabled", False),
+                key="point_cloud.enabled",
+            ),
+            colorize=_bool(
+                point_cloud_raw.get("colorize", True),
+                key="point_cloud.colorize",
+            ),
+            frame_id=raw_frame_id,
+        )
+
         raw_serial = data.get("device_serial") or None
         raw_advanced_mode_json = data.get("advanced_mode_json") or None
         if raw_advanced_mode_json is not None and not isinstance(
@@ -616,6 +643,8 @@ class RealSenseConfig:
             output_depth=str(data.get("output_depth", "image/depth")),
             output_ir_left=str(data.get("output_ir_left", "image/ir_left")),
             output_ir_right=str(data.get("output_ir_right", "image/ir_right")),
+            output_point_cloud=str(data.get("output_point_cloud", "point_cloud")),
+            point_cloud=point_cloud,
             color=color,
             depth=depth,
             infrared=infrared,
@@ -681,6 +710,16 @@ class RealSenseConfig:
             raise ValueError("at least one color, depth, or infrared stream must be enabled")
         if config.align_to == "color" and not config.color.data_flow.enabled:
             raise ValueError("align_to='color' requires color.data_flow.enabled=true")
+        if config.point_cloud.enabled and not config.depth.data_flow.enabled:
+            raise ValueError("point_cloud.enabled=true requires depth.data_flow.enabled=true")
+        if (
+            config.point_cloud.enabled
+            and config.point_cloud.colorize
+            and not config.color.data_flow.enabled
+        ):
+            raise ValueError(
+                "point_cloud.colorize=true requires color.data_flow.enabled=true"
+            )
         return config
 
     @classmethod

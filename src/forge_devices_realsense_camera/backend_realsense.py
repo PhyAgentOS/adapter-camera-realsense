@@ -16,7 +16,12 @@ import numpy as np
 import pyrealsense2 as rs
 from forge_common import get_logger
 
-from .backend import DeviceInfo, RealSenseFrame, depth_units_to_metres
+from .backend import (
+    DeviceInfo,
+    RealSenseFrame,
+    RealSensePointCloud,
+    depth_units_to_metres,
+)
 from .config import FilterConfig, InfraredSideConfig, RealSenseConfig, StreamDataFlowConfig
 
 logger = get_logger(__name__)
@@ -210,6 +215,160 @@ def _apply_color_post_processing(arr: np.ndarray, options: dict[str, Any]) -> np
     return arr
 
 
+def _float_components(
+    value: np.ndarray,
+    *,
+    expected_count: int,
+    component_count: int,
+    name: str,
+) -> tuple[np.ndarray, ...]:
+    array = np.asarray(value)
+    names = array.dtype.names
+    if names is not None:
+        if array.size != expected_count or len(names) < component_count:
+            raise ValueError(
+                f"RealSense {name} buffer has an unexpected shape or dtype"
+            )
+        return tuple(
+            np.asarray(array[field_name], dtype=np.float32).reshape(-1)
+            for field_name in names[:component_count]
+        )
+
+    numeric = np.asarray(array, dtype=np.float32)
+    if numeric.size != expected_count * component_count:
+        raise ValueError(f"RealSense {name} buffer has an unexpected shape")
+    matrix = numeric.reshape(expected_count, component_count)
+    return tuple(matrix[:, index] for index in range(component_count))
+
+
+def _freeze_contiguous(value: np.ndarray, dtype: np.dtype) -> np.ndarray:
+    array = np.asarray(value, dtype=dtype)
+    if not array.flags.c_contiguous or not array.flags.aligned:
+        array = np.array(array, dtype=dtype, order="C", copy=True)
+    current: object | None = array
+    while isinstance(current, np.ndarray):
+        current.setflags(write=False)
+        current = current.base
+    return array
+
+
+def _sample_point_colors(
+    texture_coordinates: np.ndarray,
+    color_rgb: np.ndarray,
+    valid: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    color = np.asarray(color_rgb)
+    if color.dtype != np.dtype(np.uint8) or color.ndim != 3 or color.shape[2] != 3:
+        raise ValueError("RealSense point-cloud color frame must be uint8 RGB")
+
+    point_count = int(valid.size)
+    u, v = _float_components(
+        texture_coordinates,
+        expected_count=point_count,
+        component_count=2,
+        name="texture-coordinate",
+    )
+    valid_flat = valid.reshape(-1)
+    finite_uv = valid_flat & np.isfinite(u) & np.isfinite(v)
+    u_pixel = np.zeros(point_count, dtype=np.int32)
+    v_pixel = np.zeros(point_count, dtype=np.int32)
+    u_pixel[finite_uv] = np.floor(
+        u[finite_uv] * color.shape[1] + np.float32(0.5)
+    ).astype(np.int32)
+    v_pixel[finite_uv] = np.floor(
+        v[finite_uv] * color.shape[0] + np.float32(0.5)
+    ).astype(np.int32)
+    mapped = finite_uv & (u_pixel >= 0) & (u_pixel < color.shape[1])
+    mapped &= (v_pixel >= 0) & (v_pixel < color.shape[0])
+
+    red = np.zeros(point_count, dtype=np.uint8)
+    green = np.zeros(point_count, dtype=np.uint8)
+    blue = np.zeros(point_count, dtype=np.uint8)
+    red[mapped] = color[v_pixel[mapped], u_pixel[mapped], 0]
+    green[mapped] = color[v_pixel[mapped], u_pixel[mapped], 1]
+    blue[mapped] = color[v_pixel[mapped], u_pixel[mapped], 2]
+    return red.reshape(valid.shape), green.reshape(valid.shape), blue.reshape(valid.shape)
+
+
+def _point_cloud_from_sdk_buffers(
+    vertices: np.ndarray,
+    texture_coordinates: np.ndarray | None,
+    depth_m: np.ndarray,
+    color_rgb: np.ndarray | None,
+    *,
+    mirror: bool,
+    flip: bool,
+    rotate: int,
+) -> RealSensePointCloud:
+    depth = np.asarray(depth_m)
+    if depth.dtype != np.dtype(np.float32) or depth.ndim != 2:
+        raise ValueError("RealSense point-cloud depth must be a float32 image")
+
+    point_count = int(depth.size)
+    source_x, source_y, source_z = _float_components(
+        vertices,
+        expected_count=point_count,
+        component_count=3,
+        name="vertex",
+    )
+    shape = depth.shape
+    x = np.array(source_x, dtype=np.float32, order="C", copy=True).reshape(shape)
+    y = np.array(source_y, dtype=np.float32, order="C", copy=True).reshape(shape)
+    z = np.array(source_z, dtype=np.float32, order="C", copy=True).reshape(shape)
+
+    valid = np.isfinite(depth) & (depth > 0)
+    valid &= np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
+    invalid = ~valid
+    if np.any(invalid):
+        x[invalid] = np.nan
+        y[invalid] = np.nan
+        z[invalid] = np.nan
+
+    rgb: tuple[np.ndarray, np.ndarray, np.ndarray] | None = None
+    if color_rgb is not None:
+        if texture_coordinates is None:
+            raise ValueError("RealSense colorized point cloud is missing texture coordinates")
+        rgb = _sample_point_colors(texture_coordinates, color_rgb, valid)
+
+    x = _apply_orientation(x, mirror=mirror, flip=flip, rotate=rotate)
+    y = _apply_orientation(y, mirror=mirror, flip=flip, rotate=rotate)
+    z = _apply_orientation(z, mirror=mirror, flip=flip, rotate=rotate)
+    if rgb is not None:
+        rgb = tuple(
+            _apply_orientation(channel, mirror=mirror, flip=flip, rotate=rotate)
+            for channel in rgb
+        )
+
+    float32 = np.dtype(np.float32)
+    uint8 = np.dtype(np.uint8)
+    x = _freeze_contiguous(x, float32)
+    y = _freeze_contiguous(y, float32)
+    z = _freeze_contiguous(z, float32)
+    if rgb is not None:
+        rgb = tuple(_freeze_contiguous(channel, uint8) for channel in rgb)
+
+    height, width = x.shape
+    return RealSensePointCloud(
+        width=width,
+        height=height,
+        is_dense=bool(valid.all()),
+        x=x,
+        y=y,
+        z=z,
+        rgb=rgb,
+    )
+
+
+def _create_point_cloud_processor(enabled: bool) -> object | None:
+    if not enabled:
+        return None
+    try:
+        return rs.pointcloud()
+    except RuntimeError as e:
+        logger.warning("[realsense] point-cloud processor setup failed: %s", e)
+        return None
+
+
 class RealSenseBackend:
     """RealSense pipeline wrapper with background capture."""
 
@@ -221,6 +380,8 @@ class RealSenseBackend:
         self._align: rs.align | None = None
         self._depth_scale = 0.001
         self._filters: list[tuple[str, object]] = []
+        self._point_cloud = _create_point_cloud_processor(config.point_cloud.enabled)
+        self._point_cloud_failure_logged = False
         self._depth_to_disparity: object | None = None
         self._disparity_to_depth: object | None = None
         self._latest_frame: RealSenseFrame | None = None
@@ -700,8 +861,28 @@ class RealSenseBackend:
         return frame
 
     def _convert_frameset(self, frames: object) -> RealSenseFrame:
-        color = self._extract_color(frames)
-        depth = self._extract_depth(frames)
+        color_frame, decoded_color = self._extract_color_source(frames)
+        color = self._prepare_color_output(decoded_color)
+        processed_depth_frame = self._process_depth_frame(frames)
+        depth_unoriented = self._depth_frame_to_metres(processed_depth_frame)
+        point_cloud: RealSensePointCloud | None = None
+        if self._config.point_cloud.enabled and self._point_cloud is not None:
+            try:
+                point_cloud = self._extract_point_cloud(
+                    processed_depth_frame,
+                    depth_unoriented,
+                    color_frame,
+                    decoded_color,
+                )
+            except (RuntimeError, TypeError, ValueError) as e:
+                if not getattr(self, "_point_cloud_failure_logged", False):
+                    logger.warning("[realsense] point-cloud conversion failed: %s", e)
+                self._point_cloud_failure_logged = True
+            else:
+                if getattr(self, "_point_cloud_failure_logged", False):
+                    logger.info("[realsense] point-cloud conversion recovered")
+                self._point_cloud_failure_logged = False
+        depth = self._orient_depth(depth_unoriented)
         ir_left, ir_right = self._extract_ir(frames)
         timestamp_ms = 0
         try:
@@ -716,42 +897,62 @@ class RealSenseBackend:
             ir_left=ir_left,
             ir_right=ir_right,
             timestamp_ms=timestamp_ms,
+            point_cloud=point_cloud,
         )
 
     def _extract_color(self, frames: object) -> np.ndarray | None:
+        _, decoded = self._extract_color_source(frames)
+        return self._prepare_color_output(decoded)
+
+    def _extract_color_source(
+        self, frames: object
+    ) -> tuple[object | None, np.ndarray | None]:
         if not self._config.color.data_flow.enabled:
-            return None
+            return None, None
         frame = frames.get_color_frame()
         if not frame:
-            return None
-        arr = np.asanyarray(frame.get_data())
-        fmt = frame.get_profile().format()
-        if fmt == rs.format.bgr8:
-            arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-        elif fmt == rs.format.bgra8:
-            arr = cv2.cvtColor(arr, cv2.COLOR_BGRA2RGB)
-        elif fmt == rs.format.rgb8:
-            arr = np.array(arr, copy=False)
-        elif fmt == rs.format.rgba8:
-            arr = cv2.cvtColor(arr, cv2.COLOR_RGBA2RGB)
-        elif fmt == rs.format.yuyv:
-            bgr = cv2.cvtColor(arr, cv2.COLOR_YUV2BGR_YUYV)
-            arr = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        elif fmt == rs.format.raw16:
-            gray = cv2.normalize(arr, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-            arr = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
-        elif fmt == rs.format.mjpeg:
-            bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
-            if bgr is None:
-                return None
-            arr = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        else:
+            return None, None
+        return frame, self._decode_color_frame(frame)
+
+    def _prepare_color_output(self, arr: np.ndarray | None) -> np.ndarray | None:
+        if arr is None:
             return None
         arr = _apply_color_post_processing(arr, self._config.color.post_processing)
         c = self._config.color.control
         return _apply_orientation(arr, mirror=c.mirror, flip=c.flip, rotate=c.rotate)
 
+    @staticmethod
+    def _decode_color_frame(frame: object) -> np.ndarray | None:
+        arr = np.asanyarray(frame.get_data())
+        fmt = frame.get_profile().format()
+        if fmt == rs.format.bgr8:
+            return cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
+        if fmt == rs.format.bgra8:
+            return cv2.cvtColor(arr, cv2.COLOR_BGRA2RGB)
+        if fmt == rs.format.rgb8:
+            return np.array(arr, copy=False)
+        if fmt == rs.format.rgba8:
+            return cv2.cvtColor(arr, cv2.COLOR_RGBA2RGB)
+        if fmt == rs.format.yuyv:
+            bgr = cv2.cvtColor(arr, cv2.COLOR_YUV2BGR_YUYV)
+            return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        if fmt == rs.format.raw16:
+            gray = cv2.normalize(arr, None, 0, 255, cv2.NORM_MINMAX).astype(
+                np.uint8
+            )
+            return cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+        if fmt == rs.format.mjpeg:
+            bgr = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if bgr is None:
+                return None
+            return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+        return None
+
     def _extract_depth(self, frames: object) -> np.ndarray | None:
+        processed_frame = self._process_depth_frame(frames)
+        return self._orient_depth(self._depth_frame_to_metres(processed_frame))
+
+    def _process_depth_frame(self, frames: object) -> object | None:
         if not self._config.depth.data_flow.enabled:
             return None
         frame = frames.get_depth_frame()
@@ -781,19 +982,74 @@ class RealSenseBackend:
             if converted:
                 processed_frame = converted
 
-        processed_frame = self._process_depth_filter(processed_frame, "hole_filling_filter")
+        processed_frame = self._process_depth_filter(
+            processed_frame, "hole_filling_filter"
+        )
         frame = processed_frame.as_depth_frame()
-        if not frame:
+        return frame if frame else None
+
+    def _depth_frame_to_metres(self, frame: object | None) -> np.ndarray | None:
+        if frame is None:
             return None
         raw = np.asanyarray(frame.get_data())
         d = self._config.depth.control
-        depth_m = depth_units_to_metres(
+        return depth_units_to_metres(
             raw,
             depth_scale=self._depth_scale,
             min_mm=d.min_mm,
             max_mm=d.max_mm,
         )
-        return _apply_orientation(depth_m, mirror=d.mirror, flip=d.flip, rotate=d.rotate)
+
+    def _orient_depth(self, depth_m: np.ndarray | None) -> np.ndarray | None:
+        if depth_m is None:
+            return None
+        d = self._config.depth.control
+        return _apply_orientation(
+            depth_m,
+            mirror=d.mirror,
+            flip=d.flip,
+            rotate=d.rotate,
+        )
+
+    def _extract_point_cloud(
+        self,
+        depth_frame: object | None,
+        depth_m: np.ndarray | None,
+        color_frame: object | None,
+        color_rgb: np.ndarray | None,
+    ) -> RealSensePointCloud | None:
+        if depth_frame is None or depth_m is None:
+            return None
+        point_cloud = self._point_cloud
+        if point_cloud is None:
+            raise RuntimeError("RealSense point-cloud processor is unavailable")
+
+        if self._config.point_cloud.colorize:
+            if color_frame is None or color_rgb is None:
+                raise RuntimeError("RealSense color frame is unavailable or undecodable")
+            point_cloud.map_to(color_frame)
+        else:
+            color_rgb = None
+
+        points = point_cloud.calculate(depth_frame)
+        if not points:
+            return None
+        vertices = np.asanyarray(points.get_vertices())
+        texture_coordinates = (
+            np.asanyarray(points.get_texture_coordinates())
+            if color_rgb is not None
+            else None
+        )
+        d = self._config.depth.control
+        return _point_cloud_from_sdk_buffers(
+            vertices,
+            texture_coordinates,
+            depth_m,
+            color_rgb,
+            mirror=d.mirror,
+            flip=d.flip,
+            rotate=d.rotate,
+        )
 
     def _extract_ir(self, frames: object) -> tuple[np.ndarray | None, np.ndarray | None]:
         left: np.ndarray | None = None

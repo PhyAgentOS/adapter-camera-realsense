@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Intel RealSense 深度相机 dora 节点。
 
-支持 D400 系列，每个 tick 同时输出：
+支持 D400 系列，每个 tick 输出已启用的流：
   - image/color     Color 帧（Image rgb8 或 CompressedImage jpeg）
   - image/depth     Depth 帧（Image 32FC1，单位 m）
   - image/ir_left   左 IR 帧（Image mono8 或 16UC1）
   - image/ir_right  右 IR 帧（Image mono8 或 16UC1）
+  - point_cloud     可选 organized PointCloud（XYZ 或 XYZRGB，单位 m）
 
 CLI 子命令（不启动 dora）：
   list-devices   列出已连接的 RealSense 设备（可加 --json 给前端读取）
@@ -20,7 +21,7 @@ from importlib.metadata import PackageNotFoundError, distribution
 
 from dora import Node
 from forge_common import get_logger
-from forge_msgs import CompressedImage, Image
+from forge_msgs import CompressedImage, Image, PointCloudBatch
 
 from . import __version__
 from .backend import RealSenseFrame, create_backend
@@ -262,6 +263,46 @@ def _frame_to_depth_image(frame: RealSenseFrame) -> Image | None:
     return Image.from_numpy(frame.depth.astype("float32", copy=False), encoding="32FC1")
 
 
+def _frame_to_point_cloud(frame: RealSenseFrame) -> PointCloudBatch | None:
+    """Build the canonical PointCloud v1 Arrow owner without another payload copy."""
+    cloud = frame.point_cloud
+    if cloud is None:
+        return None
+    return PointCloudBatch.from_numpy(
+        x=cloud.x,
+        y=cloud.y,
+        z=cloud.z,
+        rgb=cloud.rgb,
+        width=cloud.width,
+        height=cloud.height,
+        is_dense=cloud.is_dense,
+        copy="never",
+    )
+
+
+def _send_point_cloud_output(
+    node: object,
+    frame: RealSenseFrame,
+    config: RealSenseConfig,
+) -> bool:
+    """Send the optional derived output without disrupting image streams."""
+    try:
+        point_cloud = _frame_to_point_cloud(frame)
+        if point_cloud is None:
+            return False
+        _send_output(
+            node,
+            config.output_point_cloud,
+            point_cloud.to_arrow(),
+            frame.capture_timestamp_ns,
+            frame_id=config.point_cloud.frame_id,
+        )
+    except Exception as e:
+        logger.warning("[realsense] point-cloud output failed: %s", e)
+        return False
+    return True
+
+
 def _frame_to_ir_image(arr) -> Image | None:
     """Convert IR array to forge_msgs.Image (uint8 → mono8, uint16 → 16UC1)."""
     if arr is None:
@@ -271,11 +312,18 @@ def _frame_to_ir_image(arr) -> Image | None:
     return Image.from_numpy(arr, encoding="16UC1")
 
 
-def _capture_metadata(capture_timestamp_ns: int | None) -> dict[str, int]:
+def _capture_metadata(
+    capture_timestamp_ns: int | None,
+    *,
+    frame_id: str | None = None,
+) -> dict[str, int | str]:
     """Build optional user metadata without touching Dora-managed metadata."""
-    if capture_timestamp_ns is None:
-        return {}
-    return {"capture_timestamp_ns": capture_timestamp_ns}
+    metadata: dict[str, int | str] = {}
+    if capture_timestamp_ns is not None:
+        metadata["capture_timestamp_ns"] = capture_timestamp_ns
+    if frame_id is not None:
+        metadata["frame_id"] = frame_id
+    return metadata
 
 
 def _send_output(
@@ -283,11 +331,13 @@ def _send_output(
     output_id: str,
     payload: object,
     capture_timestamp_ns: int | None,
+    *,
+    frame_id: str | None = None,
 ) -> None:
     node.send_output(  # type: ignore[attr-defined]
         output_id,
         payload,
-        metadata=_capture_metadata(capture_timestamp_ns),
+        metadata=_capture_metadata(capture_timestamp_ns, frame_id=frame_id),
     )
 
 
@@ -303,11 +353,13 @@ def run_node(config: RealSenseConfig) -> int:
     result = 0
 
     logger.info(
-        "[realsense] outputs: color=%s depth=%s ir_left=%s ir_right=%s",
+        "[realsense] outputs: color=%s depth=%s ir_left=%s ir_right=%s point_cloud=%s (%s)",
         config.output_color,
         config.output_depth,
         config.output_ir_left,
         config.output_ir_right,
+        config.output_point_cloud,
+        "enabled" if config.point_cloud.enabled else "disabled",
     )
     try:
         for event in node:
@@ -322,16 +374,20 @@ def run_node(config: RealSenseConfig) -> int:
                         result = 1
                         break
 
-                    color_img = _frame_to_color_image(frame, config)
-                    if color_img is not None:
-                        _send_output(
-                            node,
-                            config.output_color,
-                            color_img.to_arrow(),
-                            frame.capture_timestamp_ns,
-                        )
-                    else:
-                        logger.warning("[realsense] tick %d: empty color frame", frame.timestamp_ms)
+                    if config.color.data_flow.enabled:
+                        color_img = _frame_to_color_image(frame, config)
+                        if color_img is not None:
+                            _send_output(
+                                node,
+                                config.output_color,
+                                color_img.to_arrow(),
+                                frame.capture_timestamp_ns,
+                            )
+                        else:
+                            logger.warning(
+                                "[realsense] tick %d: empty color frame",
+                                frame.timestamp_ms,
+                            )
 
                     if config.depth.data_flow.enabled:
                         depth_img = _frame_to_depth_image(frame)
@@ -344,6 +400,9 @@ def run_node(config: RealSenseConfig) -> int:
                             )
                         else:
                             logger.warning("[realsense] tick %d: empty depth frame", frame.timestamp_ms)
+
+                    if config.point_cloud.enabled:
+                        _send_point_cloud_output(node, frame, config)
 
                     if config.infrared.left.enabled:
                         ir_left_img = _frame_to_ir_image(frame.ir_left)

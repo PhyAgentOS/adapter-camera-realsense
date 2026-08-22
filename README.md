@@ -1,7 +1,8 @@
 # forge-devices-realsense-camera
 
 Intel RealSense 深度相机的 Python 采集包与 Dora 节点，主要面向 Linux 上的 D400
-系列。项目支持 Color、Depth、左右 Infrared、设备枚举、快照和 PyInstaller 单文件发布。
+系列。项目支持 Color、Depth、左右 Infrared、可选 Forge PointCloud v1、设备枚举、快照和
+PyInstaller 单文件发布。
 
 - 版本：`1.0.0`
 - 许可证：Apache-2.0
@@ -14,6 +15,7 @@ Intel RealSense 深度相机的 Python 采集包与 Dora 节点，主要面向 L
 - Python 3.11 和 3.12
 - Color：`forge_msgs.Image(rgb8)` 或 `CompressedImage(jpeg)`
 - Depth：`forge_msgs.Image(32FC1)`，float32，单位米，零值表示无效深度
+- PointCloud：可选 Forge PointCloud v1 organized XYZ/XYZRGB 输出，默认关闭
 - 左右 IR：`forge_msgs.Image(mono8)` 或 `Image(16UC1)`
 - RealSense Python SDK：`pyrealsense2>=2.58.2,<3`
 - 发布二进制：Linux x86_64，glibc 2.39 或更高
@@ -96,8 +98,9 @@ dora build dataflow.yaml --uv
 dora run dataflow.yaml --uv
 ```
 
-链路为 `realsense_camera -> test_sink`。sink 解码 `Image`/`CompressedImage` 并打印
-计数、尺寸、编码和接收时间。配置 30 FPS 时，dataflow tick 通常设置为 `millis/33`。
+链路为 `realsense_camera -> test_sink`。sink 对 `point_cloud` 使用 `PointCloudView`，
+对图像使用 `Image`/`CompressedImage`，并打印点数、稠密标志、RGB 状态或图像尺寸与编码。
+配置 30 FPS 时，dataflow tick 通常设置为 `millis/33`。
 
 ## 配置
 
@@ -106,7 +109,8 @@ dora run dataflow.yaml --uv
 - `device_serial` / `device_index`：设备选择，优先使用 serial
 - `connect_delay_ms`、`init_timeout_sec`、`prewarm_frames`：启动行为
 - `align_to`：`disable` 或 `color`
-- `output_*`：稳定的 Dora topic
+- `output_*`：稳定的 Dora topic；点云 topic 默认为 `point_cloud`
+- `point_cloud`：Forge PointCloud v1 开关、RGB 着色和可选坐标系标识
 - `color.data_flow`：开关、尺寸、FPS、SDK format 和 JPEG 质量
 - `depth` / `stereo_module`：Depth/IR profile、控制项、有效范围和滤波
 - `min_mm` / `max_mm`：配置阈值使用毫米；公共 Depth 输出始终使用米
@@ -122,10 +126,34 @@ profile、设备、对齐、控制项和滤波通常需要重启采集会话后�
 | `image/depth` | `Image` | `32FC1`，米 |
 | `image/ir_left` | `Image` | `mono8` 或 `16UC1` |
 | `image/ir_right` | `Image` | `mono8` 或 `16UC1` |
+| `point_cloud` | Forge `PointCloud` v1 | organized float32 XYZ（米）及可选 uint8 RGB |
 
-Dora 图像输出会尽力附加用户 metadata `capture_timestamp_ns`。它是采集后端取得该
+点云输出默认关闭；默认 topic 与配置契约如下：
+
+```yaml
+output_point_cloud: point_cloud
+point_cloud:
+  enabled: false
+  colorize: true
+  frame_id: null
+```
+
+启用 `point_cloud.enabled` 必须同时启用 Depth；`colorize: true` 还必须启用 Color。关闭
+Color 进行 XYZ-only 采集时还需设置 `align_to: disable`。点云按 Depth 图像的行优先网格
+组织，XYZ 均为 float32 米制坐标；无效槽位的 X、Y、Z 全部为
+NaN。着色时 R/G/B 数组为 uint8，无法映射到彩色图的 RGB 为黑色；不着色时三个 RGB
+数组为空。`align_to: color` 表示 XYZ 位于 Color optical frame，`align_to: disable` 表示
+XYZ 位于 Depth optical frame。软件 mirror/flip/rotate 只重排 organized 槽位，不会变换
+XYZ 坐标向量。
+
+消费端 API 为 `PointCloudView`，例如
+`PointCloudView.from_arrow(event["value"])`。本机 NumPy/PyArrow 路径可保持低拷贝，
+但这不表示 Dora 传输链路端到端零拷贝；640×480 XYZRGB 约为 4.4 MiB/帧。
+
+Dora 图像与点云输出会尽力附加用户 metadata `capture_timestamp_ns`。它是采集后端取得该
 FrameSet 时记录的 Unix epoch 纳秒时间；同一 FrameSet 的各路输出共享该值，缓存帧重复
-返回时不会重新生成。该字段是可选的最佳估计，不替代 Dora 管理的消息时间戳。SDK 帧
+返回时不会重新生成。该字段是可选的最佳估计，不替代 Dora 管理的消息时间戳。
+`point_cloud.frame_id` 非 `null` 时，点云还会附加可选用户 metadata `frame_id`。SDK 帧
 时间戳仅用于节点日志。Depth 对齐 Color 时使用 Color 坐标系，IR 保持各自原生坐标系。
 
 ## 构建与许可证

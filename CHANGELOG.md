@@ -6,6 +6,10 @@ The project follows Semantic Versioning. Dates use the `YYYY-MM-DD` format.
 
 ## Unreleased
 
+### Added
+
+- Added optional Forge PointCloud v1 Dora output with organized XYZ/XYZRGB semantics, reference configuration, hardware-validation routing and `PointCloudView` sink decoding, and PyInstaller packaging support.
+
 ### Removed
 
 - Removed the optional security-policy and code-of-conduct files to align the public documentation set across adapters.

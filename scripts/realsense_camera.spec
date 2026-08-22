@@ -94,6 +94,7 @@ a = Analysis(
         "_yaml",
         "forge_msgs",
         "forge_msgs.image",
+        "forge_msgs.point_cloud",
         "forge_common",
         "dora",
     ],

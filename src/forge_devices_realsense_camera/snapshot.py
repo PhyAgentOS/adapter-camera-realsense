@@ -84,6 +84,11 @@ def run_snapshot(
     all_streams: bool,
 ) -> int:
     cfg = config
+    if cfg.point_cloud.enabled:
+        cfg = replace(
+            cfg,
+            point_cloud=replace(cfg.point_cloud, enabled=False),
+        )
     if jpeg_quality is not None:
         jq = max(1, min(100, int(jpeg_quality)))
         cfg = replace(cfg, color=replace(cfg.color, jpeg_quality=jq))

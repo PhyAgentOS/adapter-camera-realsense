@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Decode Forge image messages and report received stream metadata."""
+"""Decode Forge point-cloud and image messages and report stream metadata."""
 
 from __future__ import annotations
 
@@ -10,18 +10,32 @@ from pathlib import Path
 
 import yaml
 from dora import Node
-from forge_msgs import CompressedImage, Image
+from forge_msgs import CompressedImage, Image, PointCloudView
 
 
-def _decode(value: object) -> tuple[str, int, int, str]:
+def _decode(topic: str, value: object) -> str:
+    if topic == "point_cloud":
+        point_cloud = PointCloudView.from_arrow(value)
+        return (
+            f"type=PointCloud size={point_cloud.width}x{point_cloud.height} "
+            f"point_count={point_cloud.point_count} is_dense={point_cloud.is_dense} "
+            f"has_rgb={point_cloud.has_rgb}"
+        )
+
     try:
         image = Image.from_arrow(value)
-        return "Image", image.width, image.height, image.encoding
+        kind, width, height, encoding = (
+            "Image",
+            image.width,
+            image.height,
+            image.encoding,
+        )
     except Exception:
         image = CompressedImage.from_arrow(value)
         decoded = image.to_numpy()
         height, width = decoded.shape[:2]
-        return "CompressedImage", width, height, image.format
+        kind, encoding = "CompressedImage", image.format
+    return f"type={kind} size={width}x{height} encoding={encoding}"
 
 
 def main() -> int:
@@ -40,14 +54,14 @@ def main() -> int:
         topic = str(event["id"])
         counts[topic] += 1
         try:
-            kind, width, height, encoding = _decode(event["value"])
+            details = _decode(topic, event["value"])
         except Exception as exc:
             print(f"decode_error topic={topic} count={counts[topic]} error={exc}", flush=True)
             continue
         if counts[topic] == 1 or counts[topic] % print_every == 0:
             print(
-                f"topic={topic} count={counts[topic]} type={kind} "
-                f"size={width}x{height} encoding={encoding} received_at={time.time():.6f}",
+                f"topic={topic} count={counts[topic]} {details} "
+                f"received_at={time.time():.6f}",
                 flush=True,
             )
     return 0

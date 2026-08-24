@@ -1,0 +1,41 @@
+nodes:
+  - id: realsense_camera
+    path: uv
+    inputs:
+      tick: dora/timer/millis/33
+    outputs:
+      - image/color
+      - image/depth
+      - point_cloud
+      - image/ir_left
+      # sensor_node.yaml 默认关闭 infrared.right；需要右 IR 时两边一起打开
+      # - image/ir_right
+    args: run --project ../.. realsense_camera --config sensor_node.yaml
+
+  - id: point_cloud_renderer
+    path: uv
+    inputs:
+      point_cloud: realsense_camera/point_cloud
+    outputs:
+      - image/point_cloud
+    args: run --project ../.. python point_cloud_renderer.py
+
+  - id: image_viewer
+    path: image_viewer
+    inputs:
+      image/color: realsense_camera/image/color
+      image/depth: realsense_camera/image/depth
+      image/ir_left: realsense_camera/image/ir_left
+      # image/ir_right: realsense_camera/image/ir_right
+      image/point_cloud: point_cloud_renderer/image/point_cloud
+
+  - id: test_sink
+    path: uv
+    inputs:
+      image/color: realsense_camera/image/color
+      image/depth: realsense_camera/image/depth
+      point_cloud: realsense_camera/point_cloud
+      image/ir_left: realsense_camera/image/ir_left
+      # image/ir_right: realsense_camera/image/ir_right
+      image/point_cloud: point_cloud_renderer/image/point_cloud
+    args: run --project ../.. python test_sink.py --config test_sink.yaml

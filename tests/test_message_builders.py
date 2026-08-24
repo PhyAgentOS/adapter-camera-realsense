@@ -407,7 +407,24 @@ class ExampleDataflowTests(unittest.TestCase):
         text = (example_dir / "dataflow.yaml").read_text(encoding="utf-8")
         self.assertIn("test_sink", text)
         self.assertIn("realsense_camera", text)
+        self.assertNotIn("path: image_viewer", text)
         self.assertNotIn("/" + "home/", text)
+
+        viewer_text = (example_dir / "dataflow_viewer.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("test_sink", viewer_text)
+        self.assertIn("path: image_viewer", viewer_text)
+        self.assertIn("id: point_cloud_renderer", viewer_text)
+        self.assertIn("point_cloud: realsense_camera/point_cloud", viewer_text)
+        self.assertIn(
+            "image/point_cloud: point_cloud_renderer/image/point_cloud",
+            viewer_text,
+        )
+        self.assertIn("image/color: realsense_camera/image/color", viewer_text)
+        self.assertIn("image/depth: realsense_camera/image/depth", viewer_text)
+        self.assertIn("image/ir_left: realsense_camera/image/ir_left", viewer_text)
+        self.assertNotIn("/" + "home/", viewer_text)
 
     def test_only_vendor_backend_imports_sdk(self) -> None:
         source_dir = PACKAGE_ROOT / "src" / "forge_devices_realsense_camera"

@@ -32,6 +32,8 @@ jobs:
             curl \
             file \
             git \
+            libgl1 \
+            libglib2.0-0 \
             libudev1 \
             libusb-1.0-0
           rm -rf /var/lib/apt/lists/*

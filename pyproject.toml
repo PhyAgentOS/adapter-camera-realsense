@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "forge-devices-realsense-camera"
-version = "1.1.0"
+version = "2.0.0"
 description = "Linux Intel RealSense depth camera capture and Dora streaming node."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,9 +22,9 @@ classifiers = [
     "Topic :: Multimedia :: Video :: Capture",
 ]
 dependencies = [
-    "dora-rs==0.4.1",
-    "forge-common==1.0.1",
-    "forge-msgs==1.1.0",
+    "dora-rs>=1.0.1,<2",
+    "forge-common>=2.1.0,<3",
+    "forge-msgs>=2.0.0,<3",
     "pyrealsense2>=2.58.2,<3",
     "numpy>=1.26,<3",
     "opencv-python>=4.8,<6",
@@ -44,6 +44,7 @@ realsense_camera = "forge_devices_realsense_camera.main:main"
 [dependency-groups]
 dev = [
     "pytest",
+    "ruff>=0.13,<1",
 ]
 build = [
     "pip-licenses>=5,<6",
@@ -61,3 +62,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP"]

@@ -50,7 +50,7 @@ invalid = [
 if invalid:
     raise SystemExit(f"missing dependency license text: {', '.join(invalid)}")
 expected = {
-    "dora-rs": "0.4.1",
+    "dora-rs": "1.0.1",
     "pyrealsense2": "2.58.2.10647",
 }
 for distribution_name, expected_version in expected.items():
@@ -71,7 +71,7 @@ PY
     --no-license-path \
     --ignore-packages dora-rs forge-devices-realsense-camera pyrealsense2
   printf '\n\n%s\n\n' 'Dependencies with separately maintained notices'
-  cat "${SCRIPT_DIR}/licenses/dora-rs-0.4.1.txt"
+  cat "${SCRIPT_DIR}/licenses/dora-rs-1.0.1.txt"
   printf '\n\n'
   cat "${SCRIPT_DIR}/licenses/pyrealsense2-2.58.2.txt"
 } > "${LICENSE_BUNDLE}"
@@ -124,17 +124,18 @@ PY
 VERSION_OUTPUT="${WORK_DIR}/version-output.txt"
 LICENSE_OUTPUT="${WORK_DIR}/license-output.txt"
 "${BINARY}" --version > "${VERSION_OUTPUT}"
-grep -q '1.1.0' "${VERSION_OUTPUT}"
+PROJECT_VERSION=$("${VENV_DIR}/bin/python" -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+grep -q "${PROJECT_VERSION}" "${VERSION_OUTPUT}"
 "${BINARY}" licenses > "${LICENSE_OUTPUT}"
 grep -q 'Apache License' "${LICENSE_OUTPUT}"
-grep -q 'dora-rs 0.4.1' "${LICENSE_OUTPUT}"
+grep -q 'dora-rs' "${LICENSE_OUTPUT}"
 grep -q 'pyrealsense2' "${LICENSE_OUTPUT}"
 "${BINARY}" init-device --help >/dev/null
 if grep -aR -F -l "${PACKAGE_DIR}" "${BINARY}" "${AUDIT_DIR}"; then
   echo "ERROR: 构建产物包含当前 checkout 的绝对路径。" >&2
   exit 1
 fi
-if grep -aR -E -l 'git\+ssh://[^/[:space:]]+@|ssh://[^/[:space:]]+@' "${BINARY}" "${AUDIT_DIR}"; then
+if grep -aR -E -l 'git\+ssh://[^/[:space:]]+@[^/[:space:]]+|ssh://[^/[:space:]]+@[^/[:space:]]+' "${BINARY}" "${AUDIT_DIR}"; then
   echo "ERROR: 构建产物包含私有传输 URL。" >&2
   exit 1
 fi

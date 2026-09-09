@@ -4,7 +4,7 @@ Intel RealSense 深度相机的 Python 采集包与 Dora 节点，主要面向 L
 系列。项目支持 Color、Depth、左右 Infrared、可选 Forge PointCloud v1、设备枚举、快照和
 PyInstaller 单文件发布。
 
-- 版本：`1.1.0`
+- 版本：`2.0.0`
 - 许可证：Apache-2.0
 - 公共仓库：<https://github.com/Forgelab-Robotics/adapter-camera-realsense>
 - 默认分支：`master`
@@ -156,6 +156,32 @@ FrameSet 时记录的 Unix epoch 纳秒时间；同一 FrameSet 的各路输出�
 `point_cloud.frame_id` 非 `null` 时，点云还会附加可选用户 metadata `frame_id`。SDK 帧
 时间戳仅用于节点日志。Depth 对齐 Color 时使用 Color 坐标系，IR 保持各自原生坐标系。
 
+## 可选发布可观测性
+
+仅当节点启动时环境变量 **`FORGE_OBSERVABILITY=1`** 才启用；未设置、`0`、`true` 或其他
+值均关闭。默认路径不采样可观测时钟，发送调用及 `capture_timestamp_ns`/`frame_id`
+metadata 与 1.x 行为兼容。
+
+启用时，每个实际输出都是独立的新 origin。节点在 payload 构建完成后调用 Forge Common
+2.1 的公共 `Observer.publish(..., new_origin=True, ...)`，由该 API 在每个 Dora
+`send_output` 边界生成 `forge_publish_time_ns` 和 `forge_origin_time_ns`。origin ID 稳定且按
+output 区分，例如 `realsense-camera/image/color` 与 `realsense-camera/image/depth`；不会继承
+Dora `tick` origin。同一 FrameSet 的多路输出通过共同保留的业务 metadata
+`capture_timestamp_ns` 关联，而不是共享 Forge origin。
+
+每个 output 只发送一次。发送失败仍按原路径传播（PointCloud 继续按既有语义隔离并告警），
+不重试也不替换异常。时钟、指标 sink 或指标日志异常只会降级为不带观测字段的业务发送，
+不会阻断图像/点云。进程内指标使用 `BoundedMetricsSink` 限制 series 数量，每 5 秒记录并
+reset 一次 JSON 聚合日志；不保留逐消息 origin、图像内容或高基数 ID。关闭时会尽力执行
+一次 final flush，但该 flush 是 best-effort：进程被强制终止、超时或日志后端失败时不保证
+最终区间可见。
+
+```bash
+FORGE_OBSERVABILITY=1 uv run realsense_camera --config config/sensor.example.yaml
+```
+
+跨机器比较 publish/receive 延迟前应确保机器时钟同步。
+
 ## 构建与许可证
 
 ```bash
@@ -164,10 +190,10 @@ dist/realsense_camera --version
 dist/realsense_camera licenses
 ```
 
-构建产物为 `dist/realsense_camera`。1.1.0 发布归档名为
-`realsense_camera-v1.1.0-linux-x86_64-glibc2.39.tar.gz`。glibc 2.39 是本项目选定并实测的
-发布主机基线；完整 payload 的 ELF 审计最高要求为 `GLIBC_2.29`，但项目不据此声明支持
-低于 glibc 2.39 的系统。审计和发布流程见 `RELEASING.md`。
+构建产物为 `dist/realsense_camera`。2.0.0 发布归档名为
+`realsense_camera-v2.0.0-linux-x86_64-glibc2.39.tar.gz`。glibc 2.39 是当前选定的发布主机
+基线；最终兼容性必须以当次完整 payload 的 ELF 审计为准。审计和发布流程见
+`RELEASING.md`。
 
 项目及第三方许可证必须嵌入单文件程序，并可通过 `realsense_camera licenses` 离线查看。
 仓库中的 `LICENSE` 始终提供项目 Apache-2.0 文本。构建机和目标机必须使用兼容架构和
@@ -178,6 +204,7 @@ libudev、正确的 udev 权限和相机硬件。
 
 ```bash
 uv lock --check
+uv run --frozen ruff check src tests scripts examples
 uv run --frozen pytest tests -q
 uv run --frozen python -m compileall -q src scripts examples tests
 uv build

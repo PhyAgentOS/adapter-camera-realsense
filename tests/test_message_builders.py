@@ -245,6 +245,7 @@ class MessageBuilderTests(unittest.TestCase):
                 output_id,
                 mock.sentinel.payload,
                 frame.capture_timestamp_ns,
+                origin_id=realsense_main.ORIGIN_ID_COLOR,
             )
 
         self.assertEqual(node.send_output.call_count, 4)
@@ -260,6 +261,7 @@ class MessageBuilderTests(unittest.TestCase):
             mock.sentinel.payload,
             1_234_567_890,
             frame_id="camera_color_optical_frame",
+            origin_id=realsense_main.ORIGIN_ID_POINT_CLOUD,
         )
 
         self.assertEqual(
@@ -326,7 +328,13 @@ class MessageBuilderTests(unittest.TestCase):
     def test_send_output_omits_missing_capture_timestamp(self) -> None:
         node = mock.Mock()
 
-        realsense_main._send_output(node, "color", mock.sentinel.payload, None)
+        realsense_main._send_output(
+            node,
+            "color",
+            mock.sentinel.payload,
+            None,
+            origin_id=realsense_main.ORIGIN_ID_COLOR,
+        )
 
         self.assertEqual(node.send_output.call_args.kwargs["metadata"], {})
 

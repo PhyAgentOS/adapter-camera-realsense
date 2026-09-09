@@ -1,10 +1,9 @@
-dora-rs 0.4.1 license notice
+dora-rs 1.0.1 license notice
 
-The PyPI metadata for dora-rs 0.4.1 declares the MIT license, while the
-upstream v0.4.1 tag at commit 27cf18cd76aed1ca635162b83411adc2e035b36c
-contains the Apache License 2.0 at the repository root. The published sdist
-does not contain a license file. Both license texts are reproduced here for
-conservative binary redistribution.
+The PyPI metadata for dora-rs 1.0.1 declares the MIT license but its wheel does
+not contain a license file. The upstream project also distributes an Apache
+License 2.0 text at the repository root. Both license texts are reproduced here
+for conservative binary redistribution.
 
 MIT License
 

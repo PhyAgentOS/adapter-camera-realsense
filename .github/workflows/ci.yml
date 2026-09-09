@@ -44,6 +44,9 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --frozen --python ${{ matrix.python }}
 
+      - name: Run lint
+        run: uv run --frozen ruff check src tests scripts examples
+
       - name: Run tests
         run: uv run --frozen pytest tests -q
 
@@ -73,11 +76,12 @@ jobs:
       - name: Smoke-test executable and embedded licenses
         run: |
           dist/realsense_camera --version | tee version-output.txt
-          grep -q '1.1.0' version-output.txt
+          expected_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          grep -q "$expected_version" version-output.txt
           dist/realsense_camera licenses > license-output.txt
           grep -q 'Apache License' license-output.txt
           grep -q 'X-ERA' license-output.txt
-          grep -q 'dora-rs 0.4.1' license-output.txt
+          grep -q 'dora-rs' license-output.txt
           grep -q 'pyrealsense2' license-output.txt
           dist/realsense_camera init-device --help
           file dist/realsense_camera | grep -q 'ELF 64-bit LSB'
@@ -93,7 +97,7 @@ jobs:
           if strings dist/realsense_camera | grep -F "$GITHUB_WORKSPACE"; then
             exit 1
           fi
-          if strings dist/realsense_camera | grep -E 'git\+ssh://[^/[:space:]]+@|ssh://[^/[:space:]]+@'; then
+          if strings dist/realsense_camera | grep -E 'git\+ssh://[^/[:space:]]+@[^/[:space:]]+|ssh://[^/[:space:]]+@[^/[:space:]]+'; then
             exit 1
           fi
 

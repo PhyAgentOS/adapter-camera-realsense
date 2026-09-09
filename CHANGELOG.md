@@ -6,6 +6,16 @@ The project follows Semantic Versioning. Dates use the `YYYY-MM-DD` format.
 
 ## Unreleased
 
+### Added
+
+- Added opt-in producer observability with `FORGE_OBSERVABILITY=1`: each actual output is published through Forge Common `Observer.publish` as an independent new origin with a stable output-specific low-cardinality origin ID; outputs from one FrameSet remain associated by `capture_timestamp_ns`.
+- Added bounded five-second aggregate metrics logging with a best-effort final flush, plus tests for disabled compatibility, output-specific provenance, business metadata preservation, lifecycle failure isolation, and unchanged send-failure behavior.
+
+### Changed
+
+- Updated public PyPI dependency ranges to `dora-rs>=1.0.1,<2`, `forge-common>=2.1.0,<3`, and `forge-msgs>=2.0.0,<3`.
+- Updated release, lint, build, and CI checks to derive current versions instead of hard-coding 1.x package versions.
+
 ## 1.1.0 - 2026-08-22
 
 ### Added

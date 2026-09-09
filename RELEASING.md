@@ -13,6 +13,7 @@ Release from a clean, reviewed commit using a supported Python version:
 ```bash
 uv lock --check
 uv sync --frozen
+uv run --frozen ruff check src tests scripts examples
 uv run --frozen pytest tests -q
 uv build
 uv export --frozen --no-dev --no-emit-project --no-hashes \
@@ -30,7 +31,7 @@ Before creating a tag:
 
 1. Confirm `pyproject.toml`, `uv.lock`, `README.md`, and `CHANGELOG.md` agree on the version and requirements.
 2. Confirm the `master` working tree is clean and all CI jobs pass.
-3. Confirm `dora-rs==0.4.1`, `forge-common==1.0.1`, and `forge-msgs==1.1.0` resolve from public PyPI.
+3. Confirm `dora-rs>=1.0.1,<2`, `forge-common>=2.1.0,<3`, and `forge-msgs>=2.0.0,<3` resolve from public PyPI and that `uv.lock` contains no Git or private-index sources.
 4. Create an immutable annotated tag named `v<version>` at the validated commit.
 
 Do not store PyPI or repository tokens in this repository. Published package versions and public release tags must never be replaced.
@@ -46,7 +47,7 @@ dist/realsense_camera licenses > license-output.txt
 dist/realsense_camera init-device
 ```
 
-The first two commands must run without camera hardware or network access. `--version` must report the release version. `licenses` must include the project Apache-2.0 notice, X-ERA copyright, and notices for bundled dependencies including `dora-rs==0.4.1` and `pyrealsense2`. Exercise `init-device` on a release-like host and verify that its permission guidance is correct.
+The first two commands must run without camera hardware or network access. `--version` must report the package version declared in `pyproject.toml`. `licenses` must include the project Apache-2.0 notice, X-ERA copyright, and notices for bundled dependencies including the locked `dora-rs` and `pyrealsense2` versions. Exercise `init-device` on a release-like host and verify that its permission guidance is correct.
 
 The public archive filename is exactly:
 
@@ -54,7 +55,7 @@ The public archive filename is exactly:
 realsense_camera-v<version>-linux-x86_64-glibc<minimum>.tar.gz
 ```
 
-For version 1.1.0, the selected and tested release-host baseline remains glibc 2.39. The archive is therefore named `realsense_camera-v1.1.0-linux-x86_64-glibc2.39.tar.gz`. The complete payload currently has a highest symbol requirement of `GLIBC_2.29`, but this project does not claim compatibility with hosts older than glibc 2.39.
+For version 2.0.0, the selected release-host baseline is glibc 2.39. The archive is therefore named `realsense_camera-v2.0.0-linux-x86_64-glibc2.39.tar.gz`. Do not infer support for older hosts from the outer executable; use the mandatory complete-payload audit below.
 
 The archive must contain exactly one non-directory entry, the executable named `realsense_camera`. Project and third-party license text must be embedded and available through `realsense_camera licenses`; do not add a separate license file, configuration, checksum, test utility, capture, or directory to the archive.
 
@@ -63,7 +64,8 @@ Create and verify the archive with an empty staging directory. These checks are 
 ```bash
 stage="$(mktemp -d)"
 install -m 0755 dist/realsense_camera "$stage/realsense_camera"
-archive="realsense_camera-v1.1.0-linux-x86_64-glibc2.39.tar.gz"
+version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+archive="realsense_camera-v${version}-linux-x86_64-glibc2.39.tar.gz"
 tar --sort=name \
   --owner=0 --group=0 --numeric-owner \
   --mtime='UTC 1970-01-01' \
@@ -88,10 +90,10 @@ Use version-matched PyInstaller inspection/extraction tooling in a disposable di
 3. Run `readelf -d` and review `NEEDED`, `RPATH`, and `RUNPATH`; reject missing dependencies and unsafe search paths.
 4. Run `readelf --version-info` and `objdump -T` to inventory required `GLIBC_*`, `GLIBCXX_*`, and `CXXABI_*` symbol versions.
 5. Run `ldd` in a controlled release image and reject every `not found` result. Treat `ldd` output as a runtime check, not as a substitute for symbol-version inspection.
-6. Determine and record the highest required `GLIBC_*` version across the complete extracted ELF set. For 1.1.0 this is `GLIBC_2.29`; it is audit evidence, not the advertised compatibility floor.
-7. Smoke-test `--version`, `licenses`, `init-device`, device enumeration, and a real snapshot on the selected release-host baseline. For 1.1.0 that baseline is Linux x86_64 with glibc 2.39.
+6. Determine the highest required `GLIBC_*` version across the complete extracted ELF set; treat it as audit evidence, not the advertised compatibility floor.
+7. Smoke-test `--version`, `licenses`, `init-device`, device enumeration, and a real snapshot on the selected Linux x86_64 glibc 2.39 release-host baseline.
 
-Record the build host, compiler/build tooling, Python and PyInstaller versions, full ELF inventory, per-object symbol requirements, selected release-host baseline, and hardware test result. If the bundled payload cannot be completely extracted and audited, do not release it.
+If the bundled payload cannot be completely extracted and audited, do not release it.
 
 ## Final binary checks
 

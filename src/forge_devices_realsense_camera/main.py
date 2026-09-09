@@ -27,6 +27,14 @@ from . import __version__
 from .backend import RealSenseFrame, create_backend
 from .config import RealSenseConfig
 from .list_devices import run_list_devices
+from .observability import (
+    ORIGIN_ID_COLOR,
+    ORIGIN_ID_DEPTH,
+    ORIGIN_ID_IR_LEFT,
+    ORIGIN_ID_IR_RIGHT,
+    ORIGIN_ID_POINT_CLOUD,
+    Observation,
+)
 from .snapshot import resolve_snapshot_config, run_snapshot
 from .system_setup import run_init_device, runtime_preflight
 
@@ -284,6 +292,7 @@ def _send_point_cloud_output(
     node: object,
     frame: RealSenseFrame,
     config: RealSenseConfig,
+    observation: Observation | None = None,
 ) -> bool:
     """Send the optional derived output without disrupting image streams."""
     try:
@@ -296,6 +305,8 @@ def _send_point_cloud_output(
             point_cloud.to_arrow(),
             frame.capture_timestamp_ns,
             frame_id=config.point_cloud.frame_id,
+            observation=observation,
+            origin_id=ORIGIN_ID_POINT_CLOUD,
         )
     except Exception as e:
         logger.warning("[realsense] point-cloud output failed: %s", e)
@@ -333,11 +344,23 @@ def _send_output(
     capture_timestamp_ns: int | None,
     *,
     frame_id: str | None = None,
+    observation: Observation | None = None,
+    origin_id: str,
 ) -> None:
-    node.send_output(  # type: ignore[attr-defined]
+    metadata = _capture_metadata(capture_timestamp_ns, frame_id=frame_id)
+    if observation is None:
+        node.send_output(  # type: ignore[attr-defined]
+            output_id,
+            payload,
+            metadata=metadata,
+        )
+        return
+    observation.publish(
+        node,  # type: ignore[arg-type]
         output_id,
         payload,
-        metadata=_capture_metadata(capture_timestamp_ns, frame_id=frame_id),
+        metadata,
+        origin_id=origin_id,
     )
 
 
@@ -349,19 +372,34 @@ def run_node(config: RealSenseConfig) -> int:
         config.align_to,
     )
     backend = create_backend(config)
-    node = Node()
+    observation = None
     result = 0
 
-    logger.info(
-        "[realsense] outputs: color=%s depth=%s ir_left=%s ir_right=%s point_cloud=%s (%s)",
-        config.output_color,
-        config.output_depth,
-        config.output_ir_left,
-        config.output_ir_right,
-        config.output_point_cloud,
-        "enabled" if config.point_cloud.enabled else "disabled",
-    )
     try:
+        node = Node()
+        candidate = None
+        try:
+            candidate = Observation.from_env()
+            if candidate is not None:
+                candidate.start()
+            observation = candidate
+        except Exception as e:
+            logger.warning("[realsense] observability disabled after init failure: %s", e)
+            try:
+                if candidate is not None:
+                    candidate.close()
+            except Exception:
+                pass
+
+        logger.info(
+            "[realsense] outputs: color=%s depth=%s ir_left=%s ir_right=%s point_cloud=%s (%s)",
+            config.output_color,
+            config.output_depth,
+            config.output_ir_left,
+            config.output_ir_right,
+            config.output_point_cloud,
+            "enabled" if config.point_cloud.enabled else "disabled",
+        )
         for event in node:
             match event["type"]:
                 case "INPUT":
@@ -382,6 +420,8 @@ def run_node(config: RealSenseConfig) -> int:
                                 config.output_color,
                                 color_img.to_arrow(),
                                 frame.capture_timestamp_ns,
+                                observation=observation,
+                                origin_id=ORIGIN_ID_COLOR,
                             )
                         else:
                             logger.warning(
@@ -397,12 +437,19 @@ def run_node(config: RealSenseConfig) -> int:
                                 config.output_depth,
                                 depth_img.to_arrow(),
                                 frame.capture_timestamp_ns,
+                                observation=observation,
+                                origin_id=ORIGIN_ID_DEPTH,
                             )
                         else:
                             logger.warning("[realsense] tick %d: empty depth frame", frame.timestamp_ms)
 
                     if config.point_cloud.enabled:
-                        _send_point_cloud_output(node, frame, config)
+                        _send_point_cloud_output(
+                            node,
+                            frame,
+                            config,
+                            observation,
+                        )
 
                     if config.infrared.left.enabled:
                         ir_left_img = _frame_to_ir_image(frame.ir_left)
@@ -412,6 +459,8 @@ def run_node(config: RealSenseConfig) -> int:
                                 config.output_ir_left,
                                 ir_left_img.to_arrow(),
                                 frame.capture_timestamp_ns,
+                                observation=observation,
+                                origin_id=ORIGIN_ID_IR_LEFT,
                             )
                         else:
                             logger.warning("[realsense] tick %d: empty ir_left frame", frame.timestamp_ms)
@@ -424,6 +473,8 @@ def run_node(config: RealSenseConfig) -> int:
                                 config.output_ir_right,
                                 ir_right_img.to_arrow(),
                                 frame.capture_timestamp_ns,
+                                observation=observation,
+                                origin_id=ORIGIN_ID_IR_RIGHT,
                             )
                         else:
                             logger.warning("[realsense] tick %d: empty ir_right frame", frame.timestamp_ms)
@@ -437,6 +488,11 @@ def run_node(config: RealSenseConfig) -> int:
                     result = 1
                     break
     finally:
+        if observation is not None:
+            try:
+                observation.close()
+            except Exception as e:
+                logger.warning("[realsense] observability close failed: %s", e)
         try:
             backend.close()
         except Exception as e:

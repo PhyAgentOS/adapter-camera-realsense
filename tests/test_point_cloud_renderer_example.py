@@ -8,7 +8,6 @@ import numpy as np
 import pytest
 from forge_msgs import PointCloudBatch
 
-
 SCRIPT_PATH = (
     Path(__file__).resolve().parents[1]
     / "examples"

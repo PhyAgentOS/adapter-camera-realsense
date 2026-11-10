@@ -22,7 +22,12 @@ from .backend import (
     RealSensePointCloud,
     depth_units_to_metres,
 )
-from .config import FilterConfig, InfraredSideConfig, RealSenseConfig, StreamDataFlowConfig
+from .config import (
+    FilterConfig,
+    InfraredSideConfig,
+    RealSenseConfig,
+    StreamDataFlowConfig,
+)
 
 logger = get_logger(__name__)
 

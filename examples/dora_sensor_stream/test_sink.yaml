@@ -1,1 +1,5 @@
 print_every: 30
+
+# Each required stream must deliver valid images before a test can pass.
+min_frames: 1
+expected_inputs: [image/color, image/depth]

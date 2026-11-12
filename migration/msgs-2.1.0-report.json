@@ -1,0 +1,160 @@
+{
+  "repository": "adapter-camera-realsense",
+  "round": "msgs-2.1.0 alignment / 2026-11-12",
+  "breaking_change": "Forge 1.x / Dora 0.4.x to Forge 2.x / Dora 1.x requires aligned Forge packages, runtime services, node peers and rebuilt artifacts. Forge families version independently. forge_msgs.v1 remains unchanged.",
+  "changes": [
+    "Update paired README deployment/version compatibility notice",
+    "Require Python forge-msgs >=2.1.0,<3 and lock public Msgs 2.1.0 / Pillow 13.0.0, preserving all other locked package versions"
+  ],
+  "lock_updates": [
+    {
+      "repo": "adapter-camera-realsense",
+      "lock": "uv.lock",
+      "command": [
+        "${WORKSPACE}/.tools/bin/uv",
+        "lock",
+        "--upgrade-package",
+        "forge-msgs==2.1.0",
+        "--upgrade-package",
+        "pillow==13.0.0"
+      ],
+      "exit_code": 0,
+      "version_changes": [
+        {
+          "name": "forge-msgs",
+          "before": "2.0.0",
+          "after": "2.1.0"
+        },
+        {
+          "name": "pillow",
+          "before": "12.3.0",
+          "after": "13.0.0"
+        }
+      ]
+    }
+  ],
+  "lock_checks": [
+    {
+      "repo": "adapter-camera-realsense",
+      "lock": "uv.lock",
+      "check_exit": 0
+    }
+  ],
+  "software_tests": {
+    "repo": "adapter-camera-realsense",
+    "environment": "${WORKSPACE}/validation/pillow13/adapter-camera-realsense/.venv/bin/python",
+    "commands": [
+      [
+        "${WORKSPACE}/.tools/bin/uv",
+        "pip",
+        "install",
+        "--python",
+        "${WORKSPACE}/adapter-camera-realsense/.venv/bin/python",
+        "--no-deps",
+        "--index-url",
+        "https://pypi.org/simple",
+        "forge-msgs==2.1.0",
+        "pillow==13.0.0"
+      ],
+      [
+        "${WORKSPACE}/.tools/bin/uv",
+        "pip",
+        "install",
+        "--python",
+        "${WORKSPACE}/validation/pillow13/adapter-camera-realsense/.venv/bin/python",
+        "--no-deps",
+        "--index-url",
+        "https://pypi.org/simple",
+        "forge-msgs==2.1.0",
+        "pillow==13.0.0"
+      ],
+      [
+        "${WORKSPACE}/validation/pillow13/adapter-camera-realsense/.venv/bin/python",
+        "-m",
+        "pytest",
+        "tests/test_observability.py",
+        "tests/test_point_cloud_renderer_example.py",
+        "tests/test_system_setup.py",
+        "tests/test_stream_sink.py",
+        "-q"
+      ]
+    ],
+    "scope": "Existing local test environment with exact public Msgs/Pillow update; platform SDK exclusions are reported, not production acceptance.",
+    "update_exit": 0,
+    "excluded": "Linux pyrealsense2 SDK excluded; using existing portable test environment.",
+    "tests_exit": 0,
+    "test_summary": [
+      ".....................................................                    [100%]",
+      "53 passed in 4.66s"
+    ],
+    "retry_reason": "Use repository default import mode (test-local helper imports), or existing SDK-excluded portable environment.",
+    "installed_versions": {
+      "forge-msgs": "2.1.0",
+      "pillow": "13.0.0",
+      "dora-rs": "1.0.1"
+    }
+  },
+  "dependency_audit": {
+    "repo": "adapter-camera-realsense",
+    "audit_exit": 0,
+    "findings": [],
+    "skipped": []
+  },
+  "dora_run_records": [
+    {
+      "repo": "adapter-camera-realsense",
+      "entry": "realsense",
+      "scope": "Absent serial prerequisite diagnostic only; no physical camera capture accepted.",
+      "mode": "chain",
+      "command": [
+        "${WORKSPACE}/.test-env/bin/dora",
+        "run",
+        "${WORKSPACE}/validation/downstream-msgs210-20261112/native/realsense/chain/dataflow.yaml",
+        "--stop-after",
+        "4s"
+      ],
+      "exit_code": 1,
+      "error": null,
+      "passed": false,
+      "includes_gateway": true,
+      "status": "diagnostic only / not accepted",
+      "source_report": "native/realsense/chain/report.json",
+      "runtime_errors": [
+        "2026-11-12T08:15:23.182610Z ERROR node_failure: dora_daemon::spawn::prepared: node exited with error: ExitCode(1) node_id=target dataflow_id=01a1ced3-6571-7d44-891f-2c99c2b2f294",
+        "16:15:23 ERROR  target: daemon exited with code 1 with stderr output:",
+        "16:15:23 stdout adapter-forge-gateway: 2026-11-12 16:15:23 - forge_gateway.cli - ERROR - gateway startup failed: Could not initiate node from environment variable. For dynamic node, please add a node id in the initialization function.",
+        "2026-11-12T08:15:23.822435Z ERROR node_failure: dora_daemon::spawn::prepared: node exited with error: ExitCode(1) node_id=adapter-forge-gateway dataflow_id=01a1ced3-6571-7d44-891f-2c99c2b2f294",
+        "16:15:23 ERROR  adapter-forge-gateway: daemon exited with code 1. This error occurred because node `target` exited before connecting to dora."
+      ],
+      "local_evidence": "Full original Dora log is retained under validation/downstream-msgs210-20261112/native/realsense/chain/dora.log"
+    },
+    {
+      "repo": "adapter-camera-realsense",
+      "entry": "realsense",
+      "scope": "Absent serial prerequisite diagnostic only; no physical camera capture accepted.",
+      "mode": "single",
+      "command": [
+        "${WORKSPACE}/.test-env/bin/dora",
+        "run",
+        "${WORKSPACE}/validation/downstream-msgs210-20261112/native/realsense/single/dataflow.yaml",
+        "--stop-after",
+        "4s"
+      ],
+      "exit_code": 1,
+      "error": null,
+      "passed": false,
+      "includes_gateway": false,
+      "status": "diagnostic only / not accepted",
+      "source_report": "native/realsense/single/report.json",
+      "runtime_errors": [
+        "2026-11-12T08:15:22.972784Z ERROR node_failure: dora_daemon::spawn::prepared: node exited with error: ExitCode(1) node_id=target dataflow_id=01a1ced3-626c-7adc-9c22-c4d26f3cd8d0",
+        "16:15:22 ERROR  target: daemon exited with code 1 with stderr output:"
+      ],
+      "local_evidence": "Full original Dora log is retained under validation/downstream-msgs210-20261112/native/realsense/single/dora.log"
+    }
+  ],
+  "remaining": "53 portable tests only; Linux SDK/hardware runtime unavailable on this Mac.",
+  "acceptance": "Pending; software checks, fake/dummy backends and negative prerequisite records are scoped evidence only. Every new multi-node graph contains adapter-forge-gateway.",
+  "gitlab_sync": "Not performed; follows completed acceptance.",
+  "log_publication": "Original logs remain in the local validation workspace. This public report publishes reviewed commands, outcomes, assertions and limitations only."
+}

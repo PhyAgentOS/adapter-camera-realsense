@@ -154,7 +154,7 @@ class RealSenseConfig:
     point_cloud: PointCloudConfig = field(default_factory=PointCloudConfig)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "RealSenseConfig":
+    def from_dict(cls, data: dict[str, Any]) -> RealSenseConfig:
         """Build config from YAML data."""
 
         if not isinstance(data, dict):
@@ -728,14 +728,14 @@ class RealSenseConfig:
         *,
         device_index: int = 0,
         device_serial: str | None = None,
-    ) -> "RealSenseConfig":
+    ) -> RealSenseConfig:
         cfg = cls()
         cfg.device_index = device_index
         cfg.device_serial = device_serial
         return cfg
 
     @classmethod
-    def from_yaml_path(cls, path: str | Path) -> "RealSenseConfig":
+    def from_yaml_path(cls, path: str | Path) -> RealSenseConfig:
         p = Path(path)
         with p.open(encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
@@ -744,7 +744,7 @@ class RealSenseConfig:
         return cls.from_dict(data)
 
     @classmethod
-    def load(cls, config_path: str | Path | None = None) -> "RealSenseConfig":
+    def load(cls, config_path: str | Path | None = None) -> RealSenseConfig:
         if config_path is not None:
             return cls.from_yaml_path(config_path)
         env_path = os.environ.get("REALSENSE_NODE_CONFIG", "")

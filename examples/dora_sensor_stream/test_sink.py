@@ -44,26 +44,33 @@ def main() -> int:
     args = parser.parse_args()
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8")) or {}
     print_every = max(1, int(config.get("print_every", 30)))
+    min_frames = int(config.get("min_frames", 1))
+    if min_frames < 1:
+        raise ValueError("min_frames must be positive")
+    expected = list(config.get("expected_inputs", []))
     counts: dict[str, int] = defaultdict(int)
 
     for event in Node():
         if event["type"] == "STOP":
             break
+        if event["type"] == "ERROR":
+            raise RuntimeError(event.get("error", "Dora error"))
         if event["type"] != "INPUT":
             continue
         topic = str(event["id"])
+        details = _decode(topic, event["value"])
         counts[topic] += 1
-        try:
-            details = _decode(topic, event["value"])
-        except Exception as exc:
-            print(f"decode_error topic={topic} count={counts[topic]} error={exc}", flush=True)
-            continue
         if counts[topic] == 1 or counts[topic] % print_every == 0:
             print(
                 f"topic={topic} count={counts[topic]} {details} "
                 f"received_at={time.time():.6f}",
                 flush=True,
             )
+    missing = [topic for topic in expected if counts[topic] < min_frames]
+    if missing or sum(counts.values()) < min_frames:
+        raise RuntimeError(
+            f"insufficient valid frames: counts={dict(counts)}, missing={missing}"
+        )
     return 0
 
 

@@ -3,15 +3,13 @@ from __future__ import annotations
 import threading
 import time
 import unittest
-
 from unittest import mock
 
 import numpy as np
 
 from forge_devices_realsense_camera import backend as backend_module
-from forge_devices_realsense_camera import backend_realsense
+from forge_devices_realsense_camera import backend_realsense, snapshot
 from forge_devices_realsense_camera import main as main_module
-from forge_devices_realsense_camera import snapshot
 from forge_devices_realsense_camera.backend import RealSenseFrame
 from forge_devices_realsense_camera.config import RealSenseConfig
 

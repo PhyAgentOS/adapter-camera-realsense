@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import grp
 import os
 import pwd
-import grp
 import stat
 import subprocess
 from pathlib import Path
@@ -39,7 +39,9 @@ def _status(**overrides: object) -> DeviceSetupStatus:
     return DeviceSetupStatus(**values)  # type: ignore[arg-type]
 
 
-def _passwd(name: str = "operator", uid: int = 1000, gid: int = 1000) -> pwd.struct_passwd:
+def _passwd(
+    name: str = "operator", uid: int = 1000, gid: int = 1000
+) -> pwd.struct_passwd:
     return pwd.struct_passwd((name, "x", uid, gid, "", f"/home/{name}", "/bin/sh"))
 
 
@@ -71,8 +73,12 @@ def test_inspect_matches_bundled_rule_and_discovers_accessible_realsense_node(
     node.touch()
 
     monkeypatch.setattr(system_setup.ctypes.util, "find_library", lambda _: "libusb.so")
-    monkeypatch.setattr(system_setup, "_group_status", lambda _: ("operator", True, True, True))
-    monkeypatch.setattr(system_setup.os, "access", lambda path, mode, **kwargs: path == node)
+    monkeypatch.setattr(
+        system_setup, "_group_status", lambda _: ("operator", True, True, True)
+    )
+    monkeypatch.setattr(
+        system_setup.os, "access", lambda path, mode, **kwargs: path == node
+    )
     monkeypatch.setattr(system_setup.os, "geteuid", lambda: 1000)
     monkeypatch.setattr(system_setup, "_rule_security_issue", lambda path: None)
 
@@ -89,7 +95,9 @@ def test_inspect_matches_bundled_rule_and_discovers_accessible_realsense_node(
     assert status.runtime_issues == ()
 
 
-def test_rule_match_requires_exact_reviewed_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rule_match_requires_exact_reviewed_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     rule = system_setup._bundled_rule().read_bytes()
     installed_rule = tmp_path / "rule"
     installed_rule.write_bytes(
@@ -98,7 +106,9 @@ def test_rule_match_requires_exact_reviewed_bytes(tmp_path: Path, monkeypatch: p
         )
     )
     monkeypatch.setattr(system_setup.ctypes.util, "find_library", lambda _: "library")
-    monkeypatch.setattr(system_setup, "_group_status", lambda _: ("operator", True, True, True))
+    monkeypatch.setattr(
+        system_setup, "_group_status", lambda _: ("operator", True, True, True)
+    )
     monkeypatch.setattr(system_setup.os, "geteuid", lambda: 1000)
     monkeypatch.setattr(system_setup, "_rule_security_issue", lambda path: None)
 
@@ -122,7 +132,9 @@ def test_usbfs_mode_false_negative_does_not_block_sdk_open() -> None:
     assert status.runtime_issues == ()
 
 
-def test_headless_readiness_accepts_vendor_rule_or_acl_without_video_membership() -> None:
+def test_headless_readiness_accepts_vendor_rule_or_acl_without_video_membership() -> (
+    None
+):
     status = _status(
         user_in_video_group=False,
         video_group_active=False,
@@ -151,17 +163,21 @@ def test_rule_search_paths_cover_non_usr_merged_linux() -> None:
 def test_conflicting_rule_detection_excludes_canonical_rule(tmp_path: Path) -> None:
     destination = tmp_path / "etc" / system_setup._RULE_NAME
     destination.parent.mkdir()
-    destination.write_text('ATTR{idVendor}=="8086", ATTR{idProduct}=="0b3a"\n', encoding="ascii")
+    destination.write_text(
+        'ATTR{idVendor}=="8086", ATTR{idProduct}=="0b3a"\n', encoding="ascii"
+    )
     vendor_dir = tmp_path / "usr"
     vendor_dir.mkdir()
     conflict = vendor_dir / "60-realsense.rules"
-    conflict.write_text('ATTR{idVendor}=="8086", ATTR{idProduct}=="0B3A"\n', encoding="ascii")
+    conflict.write_text(
+        'ATTR{idVendor}=="8086", ATTR{idProduct}=="0B3A"\n', encoding="ascii"
+    )
     irrelevant = vendor_dir / "70-other.rules"
     irrelevant.write_text('ATTR{idVendor}=="1234"\n', encoding="ascii")
 
-    assert system_setup._conflicting_rules(destination, (destination.parent, vendor_dir)) == (
-        str(conflict),
-    )
+    assert system_setup._conflicting_rules(
+        destination, (destination.parent, vendor_dir)
+    ) == (str(conflict),)
 
 
 def test_rule_scan_reports_unreadable_rule_separately(
@@ -191,7 +207,9 @@ def test_runtime_preflight_gives_libusb_specific_guidance(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(system_setup, "inspect_device_setup", lambda: _status(libusb_found=False))
+    monkeypatch.setattr(
+        system_setup, "inspect_device_setup", lambda: _status(libusb_found=False)
+    )
     run = mock.Mock()
     monkeypatch.setattr(system_setup.subprocess, "run", run)
 
@@ -221,7 +239,9 @@ def test_init_device_reports_missing_libusb_without_pkexec(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(system_setup.os, "geteuid", lambda: 1000)
-    monkeypatch.setattr(system_setup, "inspect_device_setup", lambda: _status(libusb_found=False))
+    monkeypatch.setattr(
+        system_setup, "inspect_device_setup", lambda: _status(libusb_found=False)
+    )
     run = mock.Mock()
     monkeypatch.setattr(system_setup.subprocess, "run", run)
 
@@ -242,7 +262,12 @@ def test_init_device_requests_fixed_privileged_subcommand(
     monkeypatch.setattr(
         system_setup,
         "_pkexec_command",
-        lambda: ["/usr/bin/pkexec", "/app/realsense_camera", "init-device", "--privileged"],
+        lambda: [
+            "/usr/bin/pkexec",
+            "/app/realsense_camera",
+            "init-device",
+            "--privileged",
+        ],
     )
     completed = mock.Mock(returncode=0)
     run = mock.Mock(return_value=completed)
@@ -287,7 +312,9 @@ def test_untrusted_frozen_path_refuses_automatic_pkexec(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(system_setup.sys, "frozen", True, raising=False)
-    monkeypatch.setattr(system_setup.sys, "executable", "/home/operator/realsense_camera")
+    monkeypatch.setattr(
+        system_setup.sys, "executable", "/home/operator/realsense_camera"
+    )
     monkeypatch.setattr(
         system_setup,
         "_validate_trusted_executable",
@@ -303,7 +330,9 @@ def test_trusted_frozen_path_builds_pkexec_command(
     executable = Path("/opt/forge/bin/realsense_camera")
     monkeypatch.setattr(system_setup.sys, "frozen", True, raising=False)
     monkeypatch.setattr(system_setup.sys, "executable", str(executable))
-    monkeypatch.setattr(system_setup, "_validate_trusted_executable", lambda path: executable)
+    monkeypatch.setattr(
+        system_setup, "_validate_trusted_executable", lambda path: executable
+    )
     monkeypatch.setattr(
         system_setup,
         "_trusted_system_executable",
@@ -375,7 +404,9 @@ def test_validate_rule_destination_rejects_symlink(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     destination = Path("/etc/udev/rules.d/99-test.rules")
-    monkeypatch.setattr(system_setup, "_validate_secure_path", lambda *args, **kwargs: Path(args[0]))
+    monkeypatch.setattr(
+        system_setup, "_validate_secure_path", lambda *args, **kwargs: Path(args[0])
+    )
     monkeypatch.setattr(
         system_setup.os,
         "lstat",
@@ -447,9 +478,13 @@ def test_privileged_helper_does_not_rewrite_matching_rule_for_group_only_change(
     trusted_command = mock.Mock(return_value=Path("/usr/sbin/usermod"))
     run = mock.Mock()
     monkeypatch.setattr(system_setup.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(system_setup, "_trusted_frozen_executable", lambda: Path("/opt/realsense"))
+    monkeypatch.setattr(
+        system_setup, "_trusted_frozen_executable", lambda: Path("/opt/realsense")
+    )
     monkeypatch.setattr(system_setup, "_caller_uid_from_pkexec", lambda: 1000)
-    monkeypatch.setattr(system_setup, "_resolve_caller", lambda uid: (user, video_group))
+    monkeypatch.setattr(
+        system_setup, "_resolve_caller", lambda uid: (user, video_group)
+    )
     monkeypatch.setattr(system_setup, "_trusted_system_executable", trusted_command)
     monkeypatch.setattr(system_setup, "_validate_rule_destination", lambda: None)
     monkeypatch.setattr(system_setup, "_scan_rule_files", lambda *args: ((), ()))
@@ -474,9 +509,13 @@ def test_privileged_helper_reports_partial_changes(
     user = _passwd()
     video_group = _group()
     monkeypatch.setattr(system_setup.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(system_setup, "_trusted_frozen_executable", lambda: Path("/opt/realsense"))
+    monkeypatch.setattr(
+        system_setup, "_trusted_frozen_executable", lambda: Path("/opt/realsense")
+    )
     monkeypatch.setattr(system_setup, "_caller_uid_from_pkexec", lambda: 1000)
-    monkeypatch.setattr(system_setup, "_resolve_caller", lambda uid: (user, video_group))
+    monkeypatch.setattr(
+        system_setup, "_resolve_caller", lambda uid: (user, video_group)
+    )
     monkeypatch.setattr(
         system_setup,
         "_trusted_system_executable",
@@ -499,3 +538,22 @@ def test_privileged_helper_reports_partial_changes(
     assert "部分修改已经完成" in error
     assert "已安装" in error
     assert "已将 operator 加入 video" in error
+
+
+@pytest.fixture(autouse=True)
+def linux_setup_environment(monkeypatch):
+    """Exercise Linux setup policy without mutating the interpreter platform."""
+    import sys
+
+    class LinuxPlatform:
+        platform = "linux"
+
+        def __getattr__(self, name):
+            return getattr(sys, name)
+
+    monkeypatch.setattr(system_setup, "sys", LinuxPlatform())
+
+
+def test_macos_is_not_accepted_as_linux_device_setup(monkeypatch):
+    monkeypatch.setattr(system_setup.sys, "platform", "darwin")
+    assert system_setup.run_init_device() == 1

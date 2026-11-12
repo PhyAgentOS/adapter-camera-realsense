@@ -1,7 +1,7 @@
 {
   "version": "2.0.1",
   "fix": "Require an ASCII hostname/IP in the ELF SSH URL guard; incomplete ssh://git@ followed by binary bytes is not a URL. Valid DNS/IPv4/IPv6 transport URLs still fail the guard.",
-  "portable_tests": "55 passed; includes two actual-grep regression tests.",
+  "portable_tests": "57 passed: actual-grep regressions, matching CI/build guards and source/distribution version consistency included.",
   "public_linux_dora_wheel_scan": "Observed failing public Dora 1.0.1 wheel now passes the corrected guard without removing URL auditing.",
   "dora_run_records": [
     {

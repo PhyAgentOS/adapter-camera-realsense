@@ -2,7 +2,7 @@
 
 # RealSense camera
 
-Release 2.0.1 corrects binary URL-audit false positives from incomplete upstream ELF strings while retaining checks for real SSH URLs. Ubuntu 20.04 archives remain software pre-releases pending device acceptance.
+Release 2.0.1 corrects binary URL-audit false positives from incomplete upstream ELF strings while retaining checks for real SSH URLs. The Ubuntu 20.04 workflow produces `realsense_camera-v2.0.1-ubuntu20.04-x86_64.tar.gz`; compatibility follows the complete ELF audit and target-host verification. It remains a software pre-release pending device and sustained-stream acceptance.
 
 ## BREAKING CHANGE: Forge 2.x / Dora 1.x migration
 

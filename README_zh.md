@@ -202,9 +202,9 @@ dist/realsense_camera --version
 dist/realsense_camera licenses
 ```
 
-构建产物为 `dist/realsense_camera`。2.0.0 发布归档名为
-`realsense_camera-v2.0.0-linux-x86_64-glibc2.39.tar.gz`。glibc 2.39 是当前选定的发布主机
-基线；最终兼容性必须以当次完整 payload 的 ELF 审计为准。审计和发布流程见
+构建产物为 `dist/realsense_camera`。2.0.1 预发布使用仓库的 Ubuntu 20.04 构建流程，归档名为
+`realsense_camera-v2.0.1-ubuntu20.04-x86_64.tar.gz`。最终兼容性必须以当次完整 payload
+的 ELF 审计和目标机验证为准；此软件预发布尚未完成设备与长稳验收。审计参考见
 `RELEASING.md`。
 
 项目及第三方许可证必须嵌入单文件程序，并可通过 `realsense_camera licenses` 离线查看。

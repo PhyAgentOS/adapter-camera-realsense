@@ -2,6 +2,8 @@
 
 # forge-devices-realsense-camera
 
+2.0.1 修正上游 ELF 中不完整字符串造成的 URL 审计误报，继续检查真实 SSH URL。Ubuntu 20.04 归档仍为待设备验收的软件预发布。
+
 ## BREAKING CHANGE：Forge 2.x / Dora 1.x 迁移
 
 本次从 Forge 1.x / Dora 0.4.x 升级需要协同部署。节点对接前必须对齐 Forge 包、Dora CLI/coordinator/daemon、本节点及上下游节点的版本；不支持在 Forge 1.x 部署中只替换单个节点。可执行产物也需要使用匹配环境重新构建和部署。仍使用旧技术栈的部署请保留在 `stable/1.x`。
@@ -14,7 +16,7 @@ Intel RealSense 深度相机的 Python 采集包与 Dora 节点，主要面向 L
 系列。项目支持 Color、Depth、左右 Infrared、可选 Forge PointCloud v1、设备枚举、快照和
 PyInstaller 单文件发布。
 
-- 版本：`2.0.0`
+- 版本：`2.0.1`
 - 许可证：Apache-2.0
 - 公共仓库：<https://github.com/Forgelab-Robotics/adapter-camera-realsense>
 - 默认分支：`master`
@@ -200,9 +202,9 @@ dist/realsense_camera --version
 dist/realsense_camera licenses
 ```
 
-构建产物为 `dist/realsense_camera`。2.0.0 发布归档名为
-`realsense_camera-v2.0.0-linux-x86_64-glibc2.39.tar.gz`。glibc 2.39 是当前选定的发布主机
-基线；最终兼容性必须以当次完整 payload 的 ELF 审计为准。审计和发布流程见
+构建产物为 `dist/realsense_camera`。2.0.1 预发布使用仓库的 Ubuntu 20.04 构建流程，归档名为
+`realsense_camera-v2.0.1-ubuntu20.04-x86_64.tar.gz`。最终兼容性必须以当次完整 payload
+的 ELF 审计和目标机验证为准；此软件预发布尚未完成设备与长稳验收。审计参考见
 `RELEASING.md`。
 
 项目及第三方许可证必须嵌入单文件程序，并可通过 `realsense_camera licenses` 离线查看。
@@ -247,7 +249,7 @@ Dora dataflow 配置的接收方；部署者负责确认 Dora/Zenoh 的网络边
 
 ## Forge 2 / Dora 1 迁移
 
-目标版本：`2.0.0`，当前为待验收改动。首轮验证组合使用 Dora 1.0.1、Forge Msgs 2.1.0、Common 2.1.0；依赖与构建工具以提交的锁文件为准。原有消息规范继续使用 `forge_msgs.v1`。
+目标版本：`2.0.1`，当前为待验收改动。首轮验证组合使用 Dora 1.0.1、Forge Msgs 2.1.0、Common 2.1.0；依赖与构建工具以提交的锁文件为准。原有消息规范继续使用 `forge_msgs.v1`。
 
 本轮要求：检查所有示例最终 YAML，使用 `dora validate <dataflow.yaml>` 验证，并实际执行消息往返。相机取流、资源释放和异常退出须分别验收；高吞吐图像链预热后连续测试至少 4 小时，覆盖慢消费者、扇出、退出与重启，记录实际内存占用。无硬件单测不能替代设备验收。
 

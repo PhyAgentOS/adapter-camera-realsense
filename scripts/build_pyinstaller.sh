@@ -136,7 +136,7 @@ if grep -aR -F -l "${PACKAGE_DIR}" "${BINARY}" "${AUDIT_DIR}"; then
   exit 1
 fi
 # Require an ASCII hostname/IP; raw ELF bytes after an incomplete URI are not a URL.
-if LC_ALL=C grep -aR -E -l '(git\+)?ssh://[A-Za-z0-9._~%+-]+@([A-Za-z0-9][A-Za-z0-9._-]*|\[[0-9A-Fa-f:]+\])' "${BINARY}" "${AUDIT_DIR}"; then
+if LC_ALL=C grep -aR -E -l '(git\+)?ssh://[^/[:space:]]+@([A-Za-z0-9][A-Za-z0-9._-]*|\[[A-Za-z0-9:.%_-]+\])' "${BINARY}" "${AUDIT_DIR}"; then
   echo "ERROR: 构建产物包含私有传输 URL。" >&2
   exit 1
 fi

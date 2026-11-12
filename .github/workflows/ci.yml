@@ -97,7 +97,7 @@ jobs:
           if strings dist/realsense_camera | grep -F "$GITHUB_WORKSPACE"; then
             exit 1
           fi
-          if strings dist/realsense_camera | grep -E '(git\+)?ssh://[A-Za-z0-9._~%+-]+@([A-Za-z0-9][A-Za-z0-9._-]*|\[[0-9A-Fa-f:]+\])'; then
+          if strings dist/realsense_camera | grep -E '(git\+)?ssh://[^/[:space:]]+@([A-Za-z0-9][A-Za-z0-9._-]*|\[[A-Za-z0-9:.%_-]+\])'; then
             exit 1
           fi
 

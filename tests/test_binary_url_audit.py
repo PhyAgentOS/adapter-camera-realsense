@@ -18,7 +18,7 @@ def test_incomplete_upstream_elf_uri_is_not_a_private_url():
     assert not scan(b"ssh://git@\x00")
 
 def test_valid_transport_urls_remain_blocked():
-    for url in (b"git+ssh://ci@git.internal.example/repo", b"ssh://git@10.0.0.8/repo", b"ssh://git@[fd00::1]/repo"):
+    for url in (b"git+ssh://ci@git.internal.example/repo", b"ssh://git@10.0.0.8/repo", b"ssh://git@[fd00::1]/repo", b"ssh://user:password@private.example/repo", b"ssh://git@[fe80::1%25eth0]/repo"):
         assert scan(b"\x00" + url + b"\x00")
 
 

@@ -2,6 +2,8 @@
 
 # RealSense camera
 
+Release 2.0.1 corrects binary URL-audit false positives from incomplete upstream ELF strings while retaining checks for real SSH URLs. Ubuntu 20.04 archives remain software pre-releases pending device acceptance.
+
 ## BREAKING CHANGE: Forge 2.x / Dora 1.x migration
 
 This migration from Forge 1.x / Dora 0.4.x requires coordinated deployment. Align the Forge packages, Dora CLI/coordinator/daemon, this node and its peer nodes before connecting a dataflow; replacing only one node in a Forge 1.x deployment is unsupported. Rebuild and redeploy executable artifacts with the matching environment. Keep `stable/1.x` for deployments that still use the previous stack.
@@ -14,7 +16,7 @@ Intel RealSense color, metric depth, stereo IR and optional point-cloud capture.
 
 ## Migration status
 
-Target node version: **2.0.0**. These changes are candidates pending the platform,
+Target node version: **2.0.1**. These changes are candidates pending the platform,
 hardware and sustained-stream acceptance gates below. A version declaration does not
 mean a stable release has been accepted.
 

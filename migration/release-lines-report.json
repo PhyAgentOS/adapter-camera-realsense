@@ -1,0 +1,76 @@
+{
+  "repository": "PhyAgentOS/adapter-camera-realsense",
+  "target": "master",
+  "scope": "Build and document Forge 1.x and 2.x releases",
+  "release_line_unit_tests": {
+    "command": "python -m unittest discover -s scripts -p test_release_line.py -v",
+    "passed": 12
+  },
+  "workflow_validation": {
+    "tool": "actionlint 1.7.12",
+    "result": "passed"
+  },
+  "distribution_checks": {
+    "result": "passed",
+    "artifacts": [
+      {
+        "name": "forge_devices_realsense_camera-2.0.1-py3-none-any.whl",
+        "size": 53746,
+        "sha256": "8e6bd44e3242ccc40fe14ecbb406e5808251816bc0774c82dac63b5d77a42982"
+      },
+      {
+        "name": "forge_devices_realsense_camera-2.0.1.tar.gz",
+        "size": 69234,
+        "sha256": "c4629e2292c59c296aad94bc450b1b6ee17ea6b5877af3e5aa220f4fea3f1765"
+      }
+    ]
+  },
+  "source_profiles": [
+    {
+      "repo": "PhyAgentOS/adapter-camera-realsense",
+      "line": "1.x",
+      "version": "1.1.0",
+      "forge_majors": [
+        1
+      ],
+      "dora_versions": [
+        [
+          0,
+          4
+        ]
+      ],
+      "kind": "python",
+      "ready": true
+    },
+    {
+      "repo": "PhyAgentOS/adapter-camera-realsense",
+      "line": "2.x",
+      "version": "2.0.1",
+      "forge_majors": [
+        2
+      ],
+      "dora_versions": [
+        [
+          1,
+          0
+        ]
+      ],
+      "kind": "python",
+      "ready": true
+    }
+  ],
+  "dora_run": {
+    "single_node": {
+      "status": "not-run",
+      "reason": "This change verifies release tooling and version metadata; no current node runtime acceptance is claimed."
+    },
+    "gateway_chain": {
+      "status": "not-run",
+      "reason": "Fresh integration acceptance remains required; every such chain must include adapter-forge-gateway from the same Forge line."
+    }
+  },
+  "linux_binary_release_build": "not-run in this change; existing binary workflow checks are preserved",
+  "hardware_model_sustained_rollback_acceptance": "pending",
+  "published_tags_releases_modified": false,
+  "gitlab_sync": false
+}

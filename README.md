@@ -1,3 +1,5 @@
+[简体中文](README_zh.md)
+
 # forge-devices-realsense-camera
 
 Intel RealSense 深度相机的 Python 采集包与 Dora 节点，主要面向 Linux 上的 D400
@@ -206,3 +208,7 @@ Dora dataflow 配置的接收方；部署者负责确认 Dora/Zenoh 的网络边
 相机图像、红外图、深度图和设备序列号都应按敏感数据处理。采集包含人员、屏幕、文档、
 位置或私人场所的数据前，应获得适用授权，并制定保留、访问和删除策略。不要把真实场景
 图像、设备录包、序列号、个人绝对路径、私有 SDK、内部 URL、凭据或密钥提交到仓库。
+
+## CI policy
+
+Automated dependency vulnerability audits are not maintained as CI or merge gates on this branch. Existing tests, builds, and other checks remain in place. Removing the audit gate does not change locked dependencies or resolve previously reported vulnerabilities.

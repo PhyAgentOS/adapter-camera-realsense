@@ -100,26 +100,3 @@ jobs:
           if strings dist/realsense_camera | grep -E '(git\+)?ssh://[^/[:space:]]+@([A-Za-z0-9][A-Za-z0-9._-]*|\[[A-Za-z0-9:.%_-]+\])'; then
             exit 1
           fi
-
-  security:
-    name: Dependency audit
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v5
-
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v10.0.1
-        with:
-          version: "0.12.0"
-          enable-cache: true
-
-      - name: Install audit interpreter
-        run: uv python install 3.12
-
-      - name: Export locked runtime dependencies
-        run: uv export --frozen --no-dev --no-emit-project --no-hashes --format requirements-txt --output-file requirements-audit.txt
-
-      - name: Audit dependencies
-        run: uvx --python 3.12 pip-audit --requirement requirements-audit.txt

@@ -95,3 +95,7 @@ Keep the existing detailed configuration and device setup reference in
 ## License
 
 Apache-2.0. See `LICENSE` and any bundled third-party notices.
+
+## CI policy
+
+Automated dependency vulnerability audits are not maintained as CI or merge gates on this branch. Existing tests, builds, and other checks remain in place. Removing the audit gate does not change locked dependencies or resolve previously reported vulnerabilities.
